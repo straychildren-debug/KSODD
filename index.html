@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>КСОДД — конструктор схем</title>
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+  <header id="ribbon"></header>
+
+  <div id="main">
+    <aside id="left" class="panel">
+      <section>
+        <h3>Слои</h3>
+        <div id="layers"></div>
+      </section>
+      <section class="grow">
+        <h3>Объекты <span id="objCount" class="muted"></span></h3>
+        <div id="objlist"></div>
+      </section>
+    </aside>
+
+    <div id="canvasWrap">
+      <svg id="canvas" xmlns="http://www.w3.org/2000/svg">
+        <g id="world">
+          <g id="grid"></g>
+          <g id="bglayer"></g>
+          <g id="scene"></g>
+          <g id="preview"></g>
+          <g id="handles"></g>
+        </g>
+      </svg>
+      <div id="scalebar"></div>
+      <div id="toast"></div>
+    </div>
+
+    <aside id="right" class="panel">
+      <h3 id="propTitle">Свойства</h3>
+      <div id="props"></div>
+    </aside>
+  </div>
+
+  <footer id="status">
+    <span id="stCoords">X: — Y: —</span>
+    <span id="stZoom"></span>
+    <span id="stHint"></span>
+  </footer>
+
+  <input type="file" id="fileOpen" accept=".json,application/json" hidden>
+  <input type="file" id="fileBg" accept="image/*" hidden>
+
+  <dialog id="exportDlg">
+    <form method="dialog">
+      <h3>Экспорт схемы</h3>
+      <label>Масштаб печати
+        <select id="exScale">
+          <option value="200">1:200</option>
+          <option value="500" selected>1:500</option>
+          <option value="1000">1:1000</option>
+          <option value="2000">1:2000</option>
+        </select>
+      </label>
+      <label>Разрешение PNG
+        <select id="exDpi">
+          <option value="96">96 dpi (экран)</option>
+          <option value="150">150 dpi</option>
+          <option value="300" selected>300 dpi (печать)</option>
+        </select>
+      </label>
+      <label class="chk"><input type="checkbox" id="exBg"> Включить подложку</label>
+      <label class="chk"><input type="checkbox" id="exWhite" checked> Белый фон</label>
+      <p id="exInfo" class="muted"></p>
+      <div class="dlgBtns">
+        <button type="button" id="exPng" class="primary">Скачать PNG</button>
+        <button type="button" id="exSvg">Скачать SVG</button>
+        <button value="cancel">Закрыть</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="js/geom.js"></script>
+  <script src="js/signs.js"></script>
+  <script src="js/render.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
