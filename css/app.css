@@ -22,16 +22,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 #ribbon {
   display: flex; align-items: stretch; gap: 0;
   background: #fafbfc; border-bottom: 1px solid var(--line);
-  padding: 4px 6px 0; overflow-x: auto; flex: none;
+  padding: 4px 6px 0; flex-wrap: wrap; row-gap: 4px; flex: none;
 }
-.rgroup { display: flex; flex-direction: column; border-right: 1px solid var(--line); padding: 0 6px; }
+.rgroup { display: flex; flex-direction: column; border-right: 1px solid var(--line); padding: 0 4px; }
 .rgroup:last-child { border-right: 0; }
-.ritems { display: flex; gap: 2px; flex: 1; }
+.ritems { display: flex; flex-wrap: wrap; gap: 1px; flex: 1; }
 .rtitle { text-align: center; color: var(--muted); font-size: 11px; padding: 2px 0 4px; white-space: nowrap; }
 .rbtn {
   display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 3px;
-  width: 64px; padding: 5px 2px 4px; border: 1px solid transparent; border-radius: 6px;
-  background: transparent; cursor: pointer; font-size: 11.5px; line-height: 1.15; text-align: center;
+  min-width: 46px; padding: 5px 3px 4px; border: 1px solid transparent; border-radius: 6px;
+  background: transparent; cursor: pointer; font-size: 11px; line-height: 1.15; text-align: center;
 }
 .rbtn svg { width: 24px; height: 24px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 .rbtn:hover { background: #eef1f5; border-color: var(--line); }
@@ -68,6 +68,10 @@ button, input, select, textarea { font: inherit; color: inherit; }
 #grid, #preview { pointer-events: none; }
 #handles circle { cursor: move; }
 #handles .rot { cursor: alias; }
+#handles .fr-nw, #handles .fr-se { cursor: nwse-resize; }
+#handles .fr-ne, #handles .fr-sw { cursor: nesw-resize; }
+#handles .fr-n, #handles .fr-s { cursor: ns-resize; }
+#handles .fr-e, #handles .fr-w { cursor: ew-resize; }
 
 #scalebar { position: absolute; left: 14px; bottom: 12px; pointer-events: none; font-size: 11px; background: rgba(255,255,255,.85); padding: 4px 6px; border-radius: 4px; }
 #scalebar .bar { display: flex; height: 6px; border: 1px solid #333; }
@@ -104,6 +108,17 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .help { color: #455a64; line-height: 1.55; font-size: 12px; }
 .help kbd { background: #eef1f5; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; font-size: 11px; font-family: inherit; }
 .help ul { padding-left: 16px; margin: 6px 0; }
+
+/* ---- Выравнивание, группы, радиусы углов ---- */
+.aligns { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; }
+.abtn { height: 30px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: #fff; cursor: pointer; color: #37474f; display: flex; align-items: center; justify-content: center; }
+.abtn:hover { background: #eef1f5; border-color: #9fc0ea; color: var(--accent); }
+.abtn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.6; }
+.obj .grp { color: var(--muted); font-size: 11px; flex: none; }
+.radii { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.radii label { display: flex; align-items: center; gap: 3px; }
+.radii b { flex: none; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 10px; display: flex; align-items: center; justify-content: center; }
+.radii input { width: 100%; min-width: 0; padding: 3px 4px; border: 1px solid var(--line); border-radius: 4px; }
 
 /* ---- Знаки ---- */
 .spgroup { font-size: 11px; color: var(--muted); margin: 8px 0 4px; }

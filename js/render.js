@@ -22,18 +22,19 @@ const LAYERS = [
 
 function layerOf(o) {
   switch (o.type) {
-    case 'road': case 'path': return 'road';
+    case 'road': case 'path': case 'roundabout': case 'pocket': case 'ramp': return 'road';
     case 'area': return o.kind === 'building' ? 'build' : o.kind === 'green' ? 'green' : 'road';
     case 'tree': return 'green';
     case 'marking': case 'crosswalk': case 'parking': return 'mark';
-    case 'light': case 'pole': return 'equip';
+    case 'light': case 'pole': case 'fence': return 'equip';
     case 'sign': return 'signs';
     default: return 'annot';
   }
 }
 
 // Порядок отрисовки (снизу вверх)
-const BUCKETS = ['base', 'rgreen', 'rwalk', 'rcurb', 'drive', 'asphalt', 'rmark', 'patch', 'mark', 'build', 'equip', 'annot', 'signs'];
+// pgreen/pwalk — газон и тротуар вокруг колец и карманов, поверх обычных тротуаров дорог
+const BUCKETS = ['base', 'rgreen', 'rwalk', 'pgreen', 'pwalk', 'rcurb', 'drive', 'asphalt', 'rmark', 'patch', 'mark', 'build', 'equip', 'annot', 'signs'];
 
 const MARK_STYLES = {
   '1.1': { l: '1.1 Сплошная', s: [{ o: 0, w: 0.1 }] },
@@ -46,7 +47,10 @@ const MARK_STYLES = {
   '1.10': { l: '1.10 Жёлтая прерывистая (запрет стоянки)', s: [{ o: 0, w: 0.1, y: 1, dash: '1 1' }] },
   '1.11': { l: '1.11 Сплошная + прерывистая', s: [{ o: -0.1, w: 0.1 }, { o: 0.1, w: 0.1, dash: '3 3' }] },
   '1.12': { l: '1.12 Стоп-линия', s: [{ o: 0, w: 0.4 }] },
+  '1.17': { l: '1.17 Остановка маршрутных ТС (зигзаг)', s: [{ o: 0, w: 0.1, y: 1, zig: [0.5, 1.5] }] },
 };
+
+const FENCE_KINDS = { ped: 'Пешеходное ограждение', barrier: 'Барьерное ограждение', fence: 'Забор' };
 
 const R = (() => {
   const f = n => Math.round(n * 100) / 100;
@@ -84,9 +88,21 @@ const R = (() => {
     const st = MARK_STYLES[style];
     if (!st || pts.length < 2) return;
     for (const s of st.s) {
-      const p = s.o ? G.offset(pts, s.o) : pts;
+      let p = s.o ? G.offset(pts, s.o) : pts;
+      if (s.zig) p = zigzag(p, s.zig[0], s.zig[1]);
       out.push(stroke(p, s.w, s.y ? C.yellow : C.mark, (s.dash ? `stroke-dasharray="${s.dash}" ` : '') + extra));
     }
+  }
+
+  // Зигзаг вдоль ломаной: размах amp в каждую сторону, период per
+  function zigzag(pts, amp, per) {
+    const L = G.length(pts), n = Math.max(2, Math.round(2 * L / per));
+    const out = [];
+    for (let k = 0; k <= n; k++) {
+      const q = along(pts, L * k / n);
+      out.push(G.add(q.p, G.mul(G.perp(q.dir), k % 2 ? amp : -amp)));
+    }
+    return out;
   }
 
   const RENDER = {};
@@ -143,7 +159,7 @@ const R = (() => {
 
   RENDER.area = (o, B, ctx) => {
     if (o.points.length < 3) return;
-    const fl = G.fillet(o.points, +o.radius || 0, o.round);
+    const fl = G.fillet(o.points, +o.radius || 0, o.round, o.radii);
     const id = idA(o), col = o.color;
     if (o.kind === 'building') {
       const fc = col || C.building;
@@ -159,6 +175,88 @@ const R = (() => {
       for (const a of fl.arcs) B.patch.push(stroke(a, 0.15, C.curb, 'stroke-linecap="round"'));
       if (o.label) { const p = G.centroid(fl.pts); B.patch.push(text(p[0], p[1], o.label, +o.labelSize || 2, '#fff', 0, id)); }
     }
+  };
+
+  // Кольцевой перекрёсток: дороги, чья ось пересекает кольцо, примыкают к нему со скруглёнными бордюрами
+  RENDER.roundabout = (o, B, ctx) => {
+    const g = ringGeom(o, ctx.doc), id = idA(o), O = g.O;
+    const ringW = Math.min(Math.max(1, +o.ringW || 7), g.R - 1), Ri = g.R - ringW;
+    const gw = Math.max(0, +o.green || 0), ww = Math.max(0, +o.walk || 0);
+    // Обход кольца идёт по возрастанию угла, поэтому «наружу» — отрицательный сдвиг
+    for (const c of g.curbs) {
+      if (gw > 0) B.pgreen.push(stroke(G.offset(c, -gw / 2), gw + 0.05, C.lawn, id));
+      if (ww > 0) {
+        B.pgreen.push(stroke(G.offset(c, -(gw + ww)), 0.12, C.walkEdge));
+        B.pwalk.push(stroke(G.offset(c, -(gw + ww / 2)), ww, C.walk, id));
+      }
+    }
+    B.patch.push(fill(g.poly, C.asphalt, id));
+    for (const c of g.curbs) B.patch.push(stroke(c, 0.15, C.curb, 'stroke-linecap="round"'));
+    const circ = r => G.arc(O, r, 0, 2 * Math.PI);
+    if (o.island === 'asphalt') {
+      // Островок, обозначенный разметкой (мини-кольцо)
+      B.mark.push(fill(circ(Ri), '#ffffff', `fill-opacity="0.35" stroke="${C.mark}" stroke-width="0.15" ${id}`));
+    } else {
+      const ap = Math.min(Math.max(0, +o.apron || 0), Ri - 0.5);
+      if (ap > 0) B.patch.push(fill(circ(Ri), '#c9c2b4', `stroke="${C.curb}" stroke-width="0.15" ${id}`));
+      B.patch.push(fill(circ(Ri - ap), o.island === 'sidewalk' ? C.walk : C.lawn, `stroke="${C.curb}" stroke-width="0.15" ${id}`));
+    }
+    const lanes = Math.max(1, Math.round(+o.lanes || 1));
+    for (let k = 1; k < lanes; k++) markLine(B.mark, circ(Ri + ringW * k / lanes), '1.5', id);
+  };
+
+  // Заездной карман: остановка или парковка вдоль бордюра (места — справа по ходу a→b)
+  RENDER.pocket = (o, B, ctx) => {
+    const g = pocketGeom(o);
+    if (!g) return;
+    const id = idA(o), gw = Math.max(0, +o.green || 0), ww = Math.max(0, +o.walk || 0);
+    if (gw > 0) B.pgreen.push(stroke(G.offset(g.curb, gw / 2), gw + 0.05, C.lawn, id));
+    if (ww > 0) {
+      B.pgreen.push(stroke(G.offset(g.curb, gw + ww), 0.12, C.walkEdge));
+      B.pwalk.push(stroke(G.offset(g.curb, gw + ww / 2), ww, C.walk, id));
+    }
+    B.patch.push(fill(g.poly, C.asphalt, id));
+    B.patch.push(stroke(g.curb, 0.15, C.curb, 'stroke-linecap="round"'));
+    if (o.kind === 'parking') {
+      RENDER.parking(Object.assign({}, o, { points: [g.a, g.b], side: 'right' }), B, ctx);
+      return;
+    }
+    if (o.zig) markLine(B.mark, [g.at(0, g.D - 0.75), g.at(g.L, g.D - 0.75)], '1.17', id);
+    if (o.pavilion && ww >= 1.2) {
+      const h = Math.min(2, ww - 0.4), d0 = g.D + gw + (ww - h) / 2, len = Math.min(6, g.L * 0.6), s0 = (g.L - len) / 2;
+      B.equip.push(fill([g.at(s0, d0), g.at(s0 + len, d0), g.at(s0 + len, d0 + h), g.at(s0, d0 + h)], '#cfd8dc', `stroke="#546e7a" stroke-width="0.08" ${id}`));
+    }
+  };
+
+  RENDER.fence = (o, B, ctx) => {
+    const c = o.points;
+    if (c.length < 2) return;
+    const step = Math.max(0.5, +o.step || 2.5), L = G.length(c);
+    let out;
+    if (o.kind === 'barrier') out = stroke(G.offset(c, 0.12), 0.07, '#455a64') + stroke(G.offset(c, -0.12), 0.07, '#455a64');
+    else out = stroke(c, o.kind === 'fence' ? 0.14 : 0.08, o.kind === 'fence' ? '#6d4c41' : '#37474f');
+    const n = Math.max(1, Math.round(L / step));
+    for (let k = 0; k <= n; k++) {
+      const p = along(c, L * k / n).p;
+      out += o.kind === 'ped'
+        ? `<circle cx="${f(p[0])}" cy="${f(p[1])}" r="0.11" fill="#37474f"/>`
+        : `<rect x="${f(p[0] - 0.12)}" y="${f(p[1] - 0.12)}" width="0.24" height="0.24" fill="${o.kind === 'fence' ? '#6d4c41' : '#263238'}"/>`;
+    }
+    B.equip.push(`<g ${idA(o)}>${out}</g>`);
+    B.equip.push(hit(c, ctx, o));
+  };
+
+  // Пандус (бордюрный съезд): x — к проезжей части (0 — бордюр), y — вдоль бордюра
+  RENDER.ramp = (o, B) => {
+    const p = o.points[0], w = Math.max(0.5, +o.width || 2), d = Math.max(0.3, +o.depth || 1.5), hw = w / 2;
+    let s = `<path d="M${f(-d)} ${f(-hw)}L0 ${f(-hw - d)}V${f(hw + d)}L${f(-d)} ${f(hw)}Z" fill="#e3ddd0" stroke="#8d8270" stroke-width="0.05"/>`;
+    s += `<rect x="${f(-d)}" y="${f(-hw)}" width="${f(d)}" height="${f(w)}" fill="#cfc8ba" stroke="#8d8270" stroke-width="0.05"/>`;
+    const tw = o.tactile ? Math.min(0.6, d * 0.4) : 0;
+    if (tw) s += `<rect x="${f(-tw)}" y="${f(-hw)}" width="${f(tw)}" height="${f(w)}" fill="${C.yellow}" fill-opacity="0.9"/>`;
+    // Стрелка уклона — вниз, к проезжей части
+    const x0 = -d * 0.85, x1 = -tw - 0.12;
+    if (x1 - x0 > 0.3) s += `<path d="M${f(x0)} 0H${f(x1 - 0.2)}" stroke="#5d4037" stroke-width="0.06"/><path d="M${f(x1)} 0L${f(x1 - 0.25)} -0.13V0.13Z" fill="#5d4037"/>`;
+    B.mark.push(`<g transform="translate(${f(p[0])} ${f(p[1])}) rotate(${f(+o.rot || 0)})" ${idA(o)}>${s}</g>`);
   };
 
   RENDER.marking = (o, B, ctx) => {
@@ -286,6 +384,7 @@ const R = (() => {
   };
 
   function render(doc, ctx) {
+    ctx = Object.assign({ doc }, ctx);
     const B = {};
     for (const k of BUCKETS) B[k] = [];
     for (const o of doc.objects) {
@@ -319,7 +418,18 @@ const R = (() => {
 // ---- Общие геометрические вычисления объектов ----
 
 function roadCenter(o) {
-  return G.dedupe(o.smooth ? G.catmull(o.points, false) : o.points);
+  const pts = G.dedupe(o.points);
+  if (o.smooth) return G.dedupe(G.catmull(pts, false));
+  const cr = +(o.curbR ?? 8);
+  if (!(cr > 0)) return pts;
+  // Ось скругляется так, чтобы внутренний бордюр шёл по радиусу cr,
+  // а все полосы, газоны и тротуары стали концентрическими дугами
+  const m = roadMetrics(o), gap = +o.greenStrip || 0;
+  return G.roundPolyline(pts, (i, turn) => {
+    const curb = turn > 0 ? m.pos : -m.neg, sw = +(turn > 0 ? o.sidewalkR : o.sidewalkL) || 0;
+    const inner = curb + (sw > 0 ? gap + sw : gap);
+    return Math.max(cr + curb, inner + 0.3);
+  });
 }
 
 function roadMetrics(o) {
@@ -327,6 +437,129 @@ function roadMetrics(o) {
   const pos = med / 2 + (+o.lanesF || 0) * lw;
   const neg = -(med / 2 + (+o.lanesB || 0) * lw);
   return { pos, neg, W: pos - neg };
+}
+
+// Точка и направление на расстоянии s от начала ломаной
+function along(pts, s) {
+  let acc = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1], b = pts[i], l = G.dist(a, b);
+    if (acc + l >= s || i === pts.length - 1) {
+      const t = l ? Math.max(0, Math.min(1, (s - acc) / l)) : 0;
+      return { p: G.lerp(a, b, t), dir: G.norm(G.sub(b, a)) };
+    }
+    acc += l;
+  }
+  return { p: pts[0], dir: [1, 0] };
+}
+
+// Примыкания дорог к кольцу: где ось дороги пересекает наружную кромку кольца
+function ringArms(o, doc) {
+  const O = o.points[0], R = +o.R || 20, arms = [];
+  if (!doc) return arms;
+  for (const r of doc.objects) {
+    if (r.type !== 'road' || r.hidden || r.points.length < 2) continue;
+    const c = roadCenter(r), n = c.length;
+    if (n < 2) continue;
+    // Концы чуть продлеваются: дорога, доведённая до кромки, тоже считается примыканием
+    const ext = [G.add(c[0], G.mul(G.norm(G.sub(c[0], c[1])), 2)), ...c, G.add(c[n - 1], G.mul(G.norm(G.sub(c[n - 1], c[n - 2])), 2))];
+    const m = roadMetrics(r);
+    for (let i = 1; i < ext.length; i++) {
+      const a = ext[i - 1], d = G.sub(ext[i], a);
+      for (const t of G.lineCircle(a, d, O, R)) {
+        if (t < 0 || t >= 1) continue;
+        const X = G.add(a, G.mul(d, t)), u = G.norm(d), out = G.dot(u, G.sub(X, O));
+        if (Math.abs(out) < 1e-6) continue;
+        arms.push({ X, d: G.mul(u, Math.sign(out)), n: G.perp(u), m, ang: Math.atan2(X[1] - O[1], X[0] - O[0]) });
+      }
+    }
+  }
+  return arms.sort((a, b) => a.ang - b.ang);
+}
+
+// Контур проезжей части кольца с примыканиями. curbs — участки бордюра между рукавами
+function ringGeom(o, doc) {
+  const O = o.points[0], R = +o.R || 20, rf = Math.max(0, +o.entryR || 0);
+  const arms = ringArms(o, doc);
+  if (!arms.length) {
+    const c = G.arc(O, R, 0, 2 * Math.PI);
+    return { O, R, poly: c, curbs: [c], arms };
+  }
+  // Точка на кромке рукава со стороны w (кромка идёт вдоль a.d)
+  const edgeP = (a, w) => G.add(a.X, G.mul(a.n, G.dot(a.n, w) > 0 ? a.m.pos : a.m.neg));
+  // Кромка рукава со стороны w сходит на кольцо дугой радиуса rf
+  const corner = (a, w, rf) => {
+    const P0 = edgeP(a, w);
+    if (rf > 0) {
+      const C0 = G.add(P0, G.mul(w, rf)), ts = G.lineCircle(C0, a.d, O, R + rf);
+      if (ts.length) {
+        const C = G.add(C0, G.mul(a.d, ts[1])), Tl = G.add(P0, G.mul(a.d, ts[1]));
+        const Tr = G.add(O, G.mul(G.sub(C, O), R / (R + rf)));
+        const a1 = Math.atan2(Tl[1] - C[1], Tl[0] - C[0]);
+        let da = Math.atan2(Tr[1] - C[1], Tr[0] - C[0]) - a1;
+        while (da > Math.PI) da -= 2 * Math.PI;
+        while (da < -Math.PI) da += 2 * Math.PI;
+        return { ring: Tr, arc: G.arc(C, rf, a1, da) };
+      }
+    }
+    const ts = G.lineCircle(P0, a.d, O, R);
+    const T = ts.length ? G.add(P0, G.mul(a.d, ts[1])) : P0;
+    return { ring: T, arc: [T] };
+  };
+  const angOf = p => Math.atan2(p[1] - O[1], p[0] - O[0]);
+  const N = arms.length;
+  const poly = [], curbs = [];
+  for (let i = 0; i < N; i++) {
+    const a = arms[i], b = arms[(i + 1) % N], wa = G.perp(a.d), wb = G.mul(G.perp(b.d), -1);
+    let gap = b.ang - a.ang;
+    while (gap <= 0) gap += 2 * Math.PI;
+    // Между близкими рукавами скругления не помещаются — радиус уменьшается
+    let piece = null;
+    for (const k of [1, 0.6, 0.35, 0.15, 0]) {
+      const A = corner(a, wa, rf * k), Bc = corner(b, wb, rf * k);
+      const a0 = angOf(A.ring);
+      let span = angOf(Bc.ring) - a0;
+      while (span <= 0) span += 2 * Math.PI;
+      if (span < gap) {
+        piece = [...A.arc, ...G.arc(O, R, a0, span), ...Bc.arc.slice().reverse()];
+        break;
+      }
+      if (N === 1) break;
+    }
+    if (!piece) {
+      // Кромки соседних рукавов пересекаются до кольца — угол между ними, скруглённый как обычный
+      const Q = G.lineX(edgeP(a, wa), a.d, edgeP(b, wb), b.d);
+      if (!Q) continue;
+      piece = G.dist(Q, O) > R && rf > 0
+        ? G.roundPolyline([G.add(Q, G.mul(a.d, 200)), Q, G.add(Q, G.mul(b.d, 200))], () => rf).slice(1, -1)
+        : [Q];
+    }
+    piece = G.dedupe(piece);
+    curbs.push(piece);
+    poly.push(...piece);
+  }
+  return { O, R, poly: G.dedupe(poly), curbs, arms };
+}
+
+// Глубина кармана: для парковки — по расстановке мест
+function pocketDepth(o) {
+  if (o.kind !== 'parking') return Math.max(0.5, +o.depth || 3);
+  const ang = +o.angle || 0;
+  return ang === 0 ? (+o.stallW || 2.5) : (+o.stallL || 5) * Math.sin(ang * Math.PI / 180);
+}
+
+// Карман: points — начало и конец площадки на кромке проезжей части, карман справа по ходу
+function pocketGeom(o) {
+  const [a, b] = o.points;
+  if (!b) return null;
+  const L = G.dist(a, b);
+  if (L < 0.5) return null;
+  const u = G.norm(G.sub(b, a)), n = G.perp(u), D = pocketDepth(o);
+  const t1 = Math.max(0, +o.taperIn || 0), t2 = Math.max(0, +o.taperOut || 0), r = Math.max(0, +o.radius || 0), ext = Math.max(3, r);
+  const at = (s, h) => G.add(G.add(a, G.mul(u, s)), G.mul(n, h));
+  const raw = [at(-t1 - ext, 0), at(-t1, 0), at(0, D), at(L, D), at(L + t2, 0), at(L + t2 + ext, 0)];
+  const curb = r > 0 ? G.roundPolyline(raw, () => r) : raw;
+  return { a, b, u, n, L, D, at, curb, poly: [...curb, at(L + t2 + ext, -0.4), at(-t1 - ext, -0.4)] };
 }
 
 function parkingGeom(o) {
