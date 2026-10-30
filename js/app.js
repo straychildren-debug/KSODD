@@ -11,7 +11,7 @@ const SNAP_STEP = 0.5;
 
 // ---------- Параметры новых объектов (по инструменту) ----------
 const DEFAULTS = {
-  road: { name: '', lanesF: 1, lanesB: 1, laneW: 3.5, median: 0, centerLine: 'single', laneLine: 'dashed', edgeLine: false, greenStrip: 1.5, sidewalkR: 2.25, sidewalkL: 2.25, smooth: false, trimStart: 0, trimEnd: 0 },
+  road: { name: '', lanesF: 1, lanesB: 1, laneW: 3.5, median: 0, centerLine: 'single', laneLine: 'dashed', edgeLine: false, greenStrip: 1.5, sidewalkR: 2.25, sidewalkL: 2.25, curbR: 8, smooth: false, trimStart: 0, trimEnd: 0 },
   sidewalk: { width: 2.25, smooth: false },
   drive: { width: 6, smooth: false },
   building: { label: '', floors: '', labelSize: 2, round: 'none', radius: 0 },
@@ -19,6 +19,11 @@ const DEFAULTS = {
   plaza: { label: '', round: 'none', radius: 0 },
   asphalt: { label: '', labelSize: 2, round: 'none', radius: 0 },
   junction: { label: '', labelSize: 2, round: 'inner', radius: 8 },
+  roundabout: { R: 20, ringW: 7, lanes: 2, island: 'green', apron: 2, entryR: 12, green: 1.5, walk: 3 },
+  busstop: { kind: 'bus', depth: 3, taperIn: 15, taperOut: 15, radius: 15, green: 1.5, walk: 2.25, zig: true, pavilion: true },
+  pocket: { kind: 'parking', taperIn: 5, taperOut: 5, radius: 3, green: 1.5, walk: 2.25, angle: 0, stallW: 2.5, stallL: 6, numbered: false, startNum: 1, highlight: false, hlColor: '#2f80ed', mgn: 0 },
+  fence: { kind: 'ped', step: 2.5 },
+  ramp: { width: 2, depth: 1.5, tactile: true, rot: 0 },
   tree: { r: 2.5 },
   marking: { style: '1.1', smooth: false },
   crosswalk: { width: 4, style: 'white' },
@@ -35,12 +40,15 @@ const HINT_POLY = 'Щёлкайте точки. Двойной щелчок / En
 const HINT_POLYGON = 'Протяните мышью — прямоугольник, или щёлкайте вершины многоугольника. Двойной щелчок / Enter — завершить, Esc — отмена.';
 
 const TOOLS = {
-  select: { l: 'Выбор', i: 'cursor', key: 'v', hint: 'Щелчок — выбрать (Shift — добавить), рамка — выбрать несколько, перетаскивание — переместить. Двойной щелчок по линии — добавить вершину, правый щелчок по вершине — удалить. Q/E — поворот, стрелки — сдвиг.' },
+  select: { l: 'Выбор', i: 'cursor', key: 'v', hint: 'Щелчок — выбрать (Shift — добавить), рамка — выбрать несколько, перетаскивание — переместить. Двойной щелчок по линии — добавить вершину, правый щелчок по вершине — удалить. Угол прямоугольника тянет размер (Ctrl — только вершину). Рамка: квадраты — масштаб, кружок — поворот. Ctrl+щелчок — объект внутри группы. Q/E — поворот, стрелки — сдвиг.' },
   pan: { l: 'Рука', i: 'hand', key: 'h', hint: 'Перетаскивайте холст. Колесо мыши — масштаб. Также работает средняя кнопка или пробел.' },
   road: { l: 'Дорога', i: 'road', key: 'r', mode: 'poly', min: 2, make: p => ({ type: 'road', points: p }), hint: 'Щёлкайте точки оси дороги. Полосы «прямого» направления — справа по ходу рисования. Конец оси прилипает к оси другой дороги. ' + HINT_POLY },
   sidewalk: { l: 'Тротуар', i: 'walk', mode: 'poly', min: 2, make: p => ({ type: 'path', kind: 'sidewalk', points: p }), hint: 'Тротуар или дорожка по оси. ' + HINT_POLY },
   drive: { l: 'Проезд', i: 'drive', mode: 'poly', min: 2, make: p => ({ type: 'path', kind: 'drive', points: p }), hint: 'Внутриквартальный проезд / заезд. Начните внутри проезжей части дороги. ' + HINT_POLY },
   junction: { l: 'Перекрёсток', i: 'junction', key: 'j', mode: 'pick', make: p => ({ type: 'area', kind: 'asphalt', points: p }), hint: 'Щёлкните рядом с пересечением двух дорог — появится площадка перекрёстка со скруглёнными бордюрами, скрывающая разметку внутри.' },
+  roundabout: { l: 'Кольцо', i: 'ring', key: 'k', mode: 'point', make: p => ({ type: 'roundabout', points: [ringCenter(p)] }), hint: 'Щёлкните на пересечении дорог — кольцо встанет в центр перекрёстка (или в любое место). Дороги, ось которых пересекает кольцо, примыкают к нему сами; радиусы и ширины — в свойствах.' },
+  busstop: { l: 'Остановка', i: 'bus', mode: 'two', make: p => Object.assign({ type: 'pocket', kind: 'bus' }, pocketSnap(p)), hint: 'Протяните вдоль бордюра от начала до конца посадочной площадки — заездной карман с отгонами построится сам. Отгоны, ширина, разметка 1.17 — в свойствах.' },
+  pocket: { l: 'Карман', i: 'pocket', mode: 'two', make: p => Object.assign({ type: 'pocket', kind: 'parking' }, pocketSnap(p)), hint: 'Протяните вдоль бордюра — парковочный карман с разметкой мест. Расстановка (вдоль, 45°, 60°, 90°) и размеры мест — в свойствах.' },
   building: { l: 'Здание', i: 'building', key: 'b', mode: 'polygon', min: 3, make: p => ({ type: 'area', kind: 'building', points: p }), hint: HINT_POLYGON },
   green: { l: 'Газон', i: 'green', key: 'g', mode: 'polygon', min: 3, make: p => ({ type: 'area', kind: 'green', points: p }), hint: HINT_POLYGON },
   plaza: { l: 'Площадка', i: 'plaza', mode: 'polygon', min: 3, make: p => ({ type: 'area', kind: 'sidewalk', points: p }), hint: 'Мощёная площадка / широкий тротуар. ' + HINT_POLYGON },
@@ -52,6 +60,8 @@ const TOOLS = {
   tlight: { l: 'Светофор', i: 'tlight', key: 'l', mode: 'point', make: p => ({ type: 'light', kind: 'vehicle', points: [p] }), hint: 'Щёлкните, чтобы поставить светофор. Треугольник показывает, куда он светит; Q/E или ручка — поворот.' },
   plight: { l: 'Пешеходный', i: 'plight', mode: 'point', make: p => ({ type: 'light', kind: 'pedestrian', points: [p] }), hint: 'Пешеходный светофор. Q/E или ручка — поворот.' },
   pole: { l: 'Опора', i: 'pole', mode: 'point', make: p => ({ type: 'pole', points: [p] }), hint: 'Опора освещения.' },
+  fence: { l: 'Ограждение', i: 'fence', mode: 'poly', min: 2, make: p => ({ type: 'fence', points: p }), hint: 'Пешеходное или барьерное ограждение, забор (тип — в свойствах). ' + HINT_POLY },
+  ramp: { l: 'Пандус', i: 'ramp', mode: 'point', make: p => ({ type: 'ramp', points: [p], rot: rampRot(p) }), hint: 'Щёлкните на тротуаре у бордюра — пандус развернётся к ближайшей дороге. Q/E или ручка — поворот.' },
   sign: {
     l: 'Знак', i: 'sign', key: 's', mode: 'point',
     make: p => ({ type: 'sign', points: [p, [p[0], p[1] - (+state.defaults.sign.size || 2.5) * 1.2]], items: signItems(state.signPick) }),
@@ -64,11 +74,11 @@ const TOOLS = {
 
 const RIBBON = [
   ['Файл', [{ act: 'new', l: 'Новая', i: 'new' }, { act: 'open', l: 'Открыть', i: 'open' }, { act: 'save', l: 'Сохранить', i: 'save' }, { act: 'export', l: 'Экспорт', i: 'export' }, { act: 'demo', l: 'Пример', i: 'demo' }]],
-  ['Правка', [{ tool: 'select' }, { tool: 'pan' }, { act: 'undo', l: 'Отменить', i: 'undo' }, { act: 'redo', l: 'Вернуть', i: 'redo' }, { act: 'delete', l: 'Удалить', i: 'trash' }]],
-  ['Дорога', [{ tool: 'road' }, { tool: 'junction' }, { tool: 'sidewalk' }, { tool: 'drive' }]],
+  ['Правка', [{ tool: 'select' }, { tool: 'pan' }, { act: 'undo', l: 'Отменить', i: 'undo' }, { act: 'redo', l: 'Вернуть', i: 'redo' }, { act: 'copy', l: 'Копировать', i: 'copy' }, { act: 'paste', l: 'Вставить', i: 'paste' }, { act: 'delete', l: 'Удалить', i: 'trash' }]],
+  ['Дорога', [{ tool: 'road' }, { tool: 'junction' }, { tool: 'roundabout' }, { tool: 'sidewalk' }, { tool: 'drive' }, { tool: 'busstop' }, { tool: 'pocket' }]],
   ['Территория', [{ tool: 'building' }, { tool: 'green' }, { tool: 'plaza' }, { tool: 'asphalt' }, { tool: 'tree' }]],
   ['Разметка', [{ tool: 'marking' }, { tool: 'crosswalk' }, { tool: 'parking' }]],
-  ['Оборудование', [{ tool: 'tlight' }, { tool: 'plight' }, { tool: 'pole' }]],
+  ['Оборудование', [{ tool: 'tlight' }, { tool: 'plight' }, { tool: 'pole' }, { tool: 'fence' }, { tool: 'ramp' }]],
   ['Знаки', [{ tool: 'sign' }]],
   ['Оформление', [{ tool: 'text' }, { tool: 'dim' }]],
   ['Подложка', [{ act: 'bgLoad', l: 'Загрузить', i: 'image' }, { tool: 'calibrate' }]],
@@ -109,7 +119,26 @@ const ICONS = {
   fit: '<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>',
   magnet: '<path d="M6 3v8a6 6 0 0 0 12 0V3h-4v8a2 2 0 0 1-4 0V3z"/>',
   grid: '<path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18"/>',
+  ring: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/><path d="M12 1v3M12 20v3M1 12h3M20 12h3"/>',
+  bus: '<rect x="5" y="3" width="14" height="15" rx="2"/><path d="M5 11h14M8 18v3M16 18v3"/><circle cx="8.5" cy="14.5" r="1"/><circle cx="15.5" cy="14.5" r="1"/>',
+  pocket: '<path d="M2 8h4l3 5h6l3-5h4"/><path d="M2 18h20" stroke-dasharray="3 3"/>',
+  fence: '<path d="M3 15h18M3 10h18M5 6v14M12 6v14M19 6v14"/>',
+  ramp: '<path d="M2 19h20M4 19l8-8h8"/><path d="M14 5h5v5"/>',
+  copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/>',
+  paste: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1M9 10h6M9 14h6"/>',
 };
+
+// Кнопки выравнивания нескольких объектов: [режим, подсказка, значок]
+const ALIGN_BTNS = [
+  ['left', 'По левому краю', '<path d="M4 3v18"/><rect x="7" y="6" width="12" height="4"/><rect x="7" y="14" width="7" height="4"/>'],
+  ['hcenter', 'По центру (по горизонтали)', '<path d="M12 3v18"/><rect x="5" y="6" width="14" height="4"/><rect x="8" y="14" width="8" height="4"/>'],
+  ['right', 'По правому краю', '<path d="M20 3v18"/><rect x="5" y="6" width="12" height="4"/><rect x="10" y="14" width="7" height="4"/>'],
+  ['top', 'По верхнему краю', '<path d="M3 4h18"/><rect x="6" y="7" width="4" height="12"/><rect x="14" y="7" width="4" height="7"/>'],
+  ['vcenter', 'По центру (по вертикали)', '<path d="M3 12h18"/><rect x="6" y="5" width="4" height="14"/><rect x="14" y="8" width="4" height="8"/>'],
+  ['bottom', 'По нижнему краю', '<path d="M3 20h18"/><rect x="6" y="5" width="4" height="12"/><rect x="14" y="10" width="4" height="7"/>'],
+  ['distH', 'Распределить по горизонтали', '<path d="M3 3v18M21 3v18"/><rect x="6" y="8" width="3" height="8"/><rect x="10.5" y="6" width="3" height="12"/><rect x="15" y="9" width="3" height="6"/>'],
+  ['distV', 'Распределить по вертикали', '<path d="M3 3h18M3 21h18"/><rect x="8" y="6" width="8" height="3"/><rect x="6" y="10.5" width="12" height="3"/><rect x="9" y="15" width="6" height="3"/>'],
+];
 
 // ---------- Свойства объектов ----------
 const num = (k, l, step = 0.1, min = 0) => ({ k, l, t: 'num', step, min });
@@ -136,6 +165,7 @@ const PROPS = {
     num('trimStart', 'Без разметки в начале, м', 0.5), num('trimEnd', 'Без разметки в конце, м', 0.5),
     { h: 'Обустройство' },
     num('greenStrip', 'Газон у бордюра, м', 0.5), num('sidewalkR', 'Тротуар справа, м', 0.25), num('sidewalkL', 'Тротуар слева, м', 0.25),
+    num('curbR', 'Радиус бордюра на изгибах, м (0 — острый угол)', 1),
     { k: 'smooth', l: 'Плавная ось (сглаживание)', t: 'chk' },
     { btn: 'Развернуть направление', fn: o => o.points.reverse() },
     { info: o => { const m = roadMetrics(o); return `Длина оси: ${fmt(G.length(roadCenter(o)), 1)} м<br>Ширина проезжей части: ${fmt(m.W)} м<br>Вершин: ${o.points.length}`; } },
@@ -155,7 +185,57 @@ const PROPS = {
     { h: 'Углы' },
     { k: 'round', l: 'Скругление', t: 'sel', o: ROUND_OPTS },
     num('radius', 'Радиус скругления, м', 0.5),
+    { custom: o => cornerRadiiHtml(o) },
     { info: o => `Площадь: ${fmt(Math.abs(G.area(o.points)), 1)} м²<br>Периметр: ${fmt(G.length([...o.points, o.points[0]]), 1)} м` },
+  ],
+  roundabout: [
+    { h: 'Кольцо' },
+    num('R', 'Наружный радиус кольца, м', 0.5, 6),
+    num('ringW', 'Ширина проезжей части кольца, м', 0.25, 3),
+    num('lanes', 'Полос на кольце', 1, 1),
+    { k: 'island', l: 'Центральный островок', t: 'sel', o: [['green', 'газон'], ['sidewalk', 'мощение'], ['asphalt', 'разметкой (мини-кольцо)']] },
+    num('apron', 'Укреплённая полоса у островка (для грузовых), м', 0.25, 0),
+    { h: 'Примыкания и обустройство' },
+    num('entryR', 'Радиус бордюра на въездах и выездах, м', 0.5, 0),
+    num('green', 'Газон вокруг кольца, м', 0.5, 0),
+    num('walk', 'Тротуар вокруг кольца, м', 0.25, 0),
+    { note: 'Дороги, ось которых пересекает кольцо, примыкают к нему сами: бордюры скругляются, разметка внутри кольца скрывается. Доведите оси дорог до центра кольца.' },
+    { info: o => `Радиус островка: ${fmt(Math.max(0, (+o.R || 20) - (+o.ringW || 7)))} м<br>Примыканий дорог: ${ringArms(o, state.doc).length}` },
+  ],
+  pocket: [
+    { k: 'kind', l: 'Назначение', t: 'sel', o: [['bus', 'Остановка общественного транспорта'], ['parking', 'Парковочный карман']] },
+    { ...num('depth', 'Ширина кармана, м', 0.25, 1), when: o => o.kind === 'bus' },
+    num('taperIn', 'Отгон на въезде, м', 0.5, 0), num('taperOut', 'Отгон на выезде, м', 0.5, 0),
+    num('radius', 'Радиус скругления бордюра, м', 0.5, 0),
+    num('green', 'Газон за карманом, м', 0.25, 0), num('walk', 'Тротуар за карманом, м', 0.25, 0),
+    { k: 'zig', l: 'Разметка 1.17 (место остановки)', t: 'chk', when: o => o.kind === 'bus' },
+    { k: 'pavilion', l: 'Павильон ожидания', t: 'chk', when: o => o.kind === 'bus' },
+    { note: 'Типовые размеры остановки: ширина 3 м, отгоны 15–20 м, площадка 20 м на один автобус.', when: o => o.kind === 'bus' },
+    { h: 'Места', when: o => o.kind === 'parking' },
+    { k: 'angle', l: 'Расстановка', t: 'sel', n: 1, o: [['0', 'параллельно (вдоль)'], ['45', 'под углом 45°'], ['60', 'под углом 60°'], ['90', 'перпендикулярно (90°)']], when: o => o.kind === 'parking' },
+    { ...num('stallW', 'Ширина места, м', 0.1, 1.5), when: o => o.kind === 'parking' },
+    { ...num('stallL', 'Длина места, м', 0.1, 2), when: o => o.kind === 'parking' },
+    { k: 'highlight', l: 'Подсветить зону', t: 'chk', when: o => o.kind === 'parking' },
+    { k: 'hlColor', l: 'Цвет подсветки', t: 'colorPick', sw: () => PARKING_SWATCHES, when: o => o.kind === 'parking' && o.highlight },
+    { k: 'numbered', l: 'Нумеровать места', t: 'chk', when: o => o.kind === 'parking' },
+    { ...num('startNum', 'Первый номер', 1, 0), when: o => o.kind === 'parking' },
+    { ...num('mgn', 'Мест для МГН (разметка 1.24.3)', 1, 0), when: o => o.kind === 'parking' },
+    { info: o => {
+      const g = pocketGeom(o);
+      if (!g) return '';
+      const n = o.kind === 'parking' ? (parkingGeom(Object.assign({}, o, { points: [g.a, g.b], side: 'right' })) || { count: 0 }).count : 0;
+      return `Длина площадки: ${fmt(g.L, 1)} м<br>С отгонами: ${fmt(g.L + (+o.taperIn || 0) + (+o.taperOut || 0), 1)} м<br>Ширина кармана: ${fmt(g.D)} м` + (o.kind === 'parking' ? `<br>Машино-мест: <b>${n}</b>` : '');
+    } },
+  ],
+  fence: [
+    { k: 'kind', l: 'Тип', t: 'sel', o: Object.entries(FENCE_KINDS) },
+    num('step', 'Шаг стоек, м', 0.5, 0.5),
+    { info: o => `Длина: ${fmt(G.length(o.points), 1)} м` },
+  ],
+  ramp: [
+    num('width', 'Ширина съезда, м', 0.25, 0.9), num('depth', 'Длина пандуса, м', 0.25, 0.5),
+    num('rot', 'Направление (к проезжей части), °', 15, -360),
+    { k: 'tactile', l: 'Тактильная предупреждающая полоса', t: 'chk' },
   ],
   marking: [
     { k: 'style', l: 'Вид разметки', t: 'sel', o: Object.entries(MARK_STYLES).map(([k, v]) => [k, v.l]) },
@@ -200,7 +280,7 @@ const PROPS = {
   ],
 };
 
-const TYPE_NAMES = { road: 'Дорога', crosswalk: 'Пешеходный переход', tree: 'Дерево', pole: 'Опора освещения', dim: 'Размер' };
+const TYPE_NAMES = { roundabout: 'Кольцевой перекрёсток', ramp: 'Пандус', road: 'Дорога', crosswalk: 'Пешеходный переход', tree: 'Дерево', pole: 'Опора освещения', dim: 'Размер' };
 
 // Палитра знаков. mode: pick — выбрать знак для новой стойки, add — добавить на выделенную стойку
 function signPaletteHtml(mode) {
@@ -219,7 +299,7 @@ function signStackHtml(o) {
     const def = SIGN_LIB[it.code];
     if (!def) return '';
     const txt = def.text !== undefined
-      ? (it.code === '8.8' || it.code === 'txt'
+      ? (it.code === 'txt'
         ? `<textarea data-stext="${i}" rows="2">${R.esc(it.text ?? def.text)}</textarea>`
         : `<input type="text" data-stext="${i}" value="${R.esc(it.text ?? def.text)}">`)
       : '';
@@ -231,7 +311,7 @@ function signStackHtml(o) {
     <div class="ph">Добавить на стойку</div>${signPaletteHtml('add')}`;
 }
 const KIND_NAMES = { sidewalk: 'Тротуар', bike: 'Велодорожка', drive: 'Проезд', building: 'Здание', green: 'Газон', asphalt: 'Асфальт' };
-const SWATCH = { road: C.asphalt, path: C.walk, building: C.building, green: C.lawn, sidewalk: C.walk, asphalt: C.asphalt, tree: '#8bc34a', marking: '#fff', crosswalk: '#fff', parking: 'rgba(47,128,237,.5)', light: '#263238', pole: '#fff', text: '#263238', dim: '#263238', sign: SC.blue };
+const SWATCH = { road: C.asphalt, path: C.walk, building: C.building, green: C.lawn, sidewalk: C.walk, asphalt: C.asphalt, tree: '#8bc34a', marking: '#fff', crosswalk: '#fff', parking: 'rgba(47,128,237,.5)', light: '#263238', pole: '#fff', text: '#263238', dim: '#263238', sign: SC.blue, roundabout: C.asphalt, pocket: C.asphalt, fence: '#37474f', ramp: '#cfc8ba' };
 
 function objLabel(o) {
   switch (o.type) {
@@ -245,6 +325,12 @@ function objLabel(o) {
     case 'parking': { const g = parkingGeom(o); return `Парковка (${g ? g.count : 0} м/м)`; }
     case 'light': return o.kind === 'pedestrian' ? 'Светофор пешеходный' : 'Светофор';
     case 'text': return 'Текст: ' + (o.text || '').split('\n')[0];
+    case 'pocket': {
+      if (o.kind === 'bus') return 'Остановка (заездной карман)';
+      const g = pocketGeom(o), pg = g && parkingGeom(Object.assign({}, o, { points: [g.a, g.b], side: 'right' }));
+      return `Парковочный карман (${pg ? pg.count : 0} м/м)`;
+    }
+    case 'fence': return FENCE_KINDS[o.kind] || 'Ограждение';
     case 'sign': return 'Знаки: ' + ((o.items || []).map(i => i.code === 'txt' ? 'текст' : i.code).join(', ') || '—');
     default: return TYPE_NAMES[o.type] || o.type;
   }
@@ -255,6 +341,7 @@ function toolOf(o) {
     case 'path': return o.kind === 'drive' ? 'drive' : 'sidewalk';
     case 'area': return o.kind === 'sidewalk' ? 'plaza' : o.kind === 'asphalt' ? (o.round === 'inner' ? 'junction' : 'asphalt') : o.kind;
     case 'light': return o.kind === 'pedestrian' ? 'plight' : 'tlight';
+    case 'pocket': return o.kind === 'bus' ? 'busstop' : 'pocket';
     default: return o.type;
   }
 }
@@ -279,6 +366,7 @@ const state = {
   defaults: clone(DEFAULTS),
   signPick: '6.4',
   space: false,
+  lastW: null, overCanvas: false, pasteInPlace: false,
   edit: null,
 };
 const doc = () => state.doc;
@@ -387,7 +475,8 @@ function renderOverlay() {
     const o = getObj(id);
     if (!o) continue;
     if (o.points.length === 1) {
-      const rad = o.type === 'tree' ? +o.r || 2.5 : o.type === 'text' ? (+o.size || 2) * 1.2 : (+o.size || 1.5) * 1.05;
+      const rad = o.type === 'tree' ? +o.r || 2.5 : o.type === 'text' ? (+o.size || 2) * 1.2 : o.type === 'roundabout' ? +o.R || 20
+        : o.type === 'ramp' ? (+o.width || 2) / 2 + (+o.depth || 1.5) : (+o.size || 1.5) * 1.05;
       s += `<circle cx="${o.points[0][0]}" cy="${o.points[0][1]}" r="${Math.max(rad, px(10))}" fill="none" stroke="${HS}" stroke-width="1.5" vector-effect="non-scaling-stroke" ${dash}/>`;
     } else {
       s += outline(o.type === 'road' ? roadCenter(o) : o.points, o.type === 'area');
@@ -408,6 +497,35 @@ function renderOverlay() {
       }
     }
   }
+  // Номера скругляемых углов площадки — для полей «Радиусы отдельных углов»
+  if (state.sel.length === 1) {
+    const o = getObj(state.sel[0]);
+    const idx = o && o.type === 'area' ? roundedCorners(o) : [];
+    if (idx.length && idx.length <= MAX_CORNERS) {
+      const P = o.points, N = P.length;
+      idx.forEach((i, n) => {
+        // Номер — по биссектрисе угла, там, где проходит скругление
+        const p = P[i], bis = G.add(G.norm(G.sub(P[(i + N - 1) % N], p)), G.norm(G.sub(P[(i + 1) % N], p)));
+        const q = G.add(p, G.mul(G.norm(bis), px(20)));
+        s += `<circle cx="${q[0]}" cy="${q[1]}" r="${px(8)}" fill="${HS}"/><text x="${q[0]}" y="${q[1]}" font-size="${px(11)}" fill="#fff" text-anchor="middle" dominant-baseline="central" font-family="Arial" font-weight="bold">${n + 1}</text>`;
+      });
+    }
+  }
+  // Рамка вокруг выделения: квадраты — масштаб, кружок сверху — поворот
+  const fb = frameBox();
+  if (fb) {
+    const pad = px(10), x0 = fb.x0 - pad, y0 = fb.y0 - pad, x1 = fb.x1 + pad, y1 = fb.y1 + pad, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, hs = px(4);
+    s += `<rect x="${x0}" y="${y0}" width="${x1 - x0}" height="${y1 - y0}" fill="none" stroke="${HS}" stroke-width="1" stroke-opacity="0.55" vector-effect="non-scaling-stroke"/>`;
+    const pos = { nw: [x0, y0], n: [cx, y0], ne: [x1, y0], e: [x1, cy], se: [x1, y1], s: [cx, y1], sw: [x0, y1], w: [x0, cy] };
+    for (const [k, q] of Object.entries(pos)) {
+      if ((k === 'n' || k === 's') && fb.y1 - fb.y0 < 0.01) continue;
+      if ((k === 'e' || k === 'w') && fb.x1 - fb.x0 < 0.01) continue;
+      h += `<rect class="fr fr-${k}" data-handle="__frame:${k}" x="${q[0] - hs}" y="${q[1] - hs}" width="${2 * hs}" height="${2 * hs}" fill="#fff" stroke="${HS}" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`;
+    }
+    const ry = y0 - px(26);
+    h += `<path d="M${cx} ${y0}L${cx} ${ry}" stroke="${HS}" stroke-width="1" vector-effect="non-scaling-stroke" pointer-events="none"/>`;
+    h += `<circle class="rot" data-handle="__frame:rot" cx="${cx}" cy="${ry}" r="${px(5)}" fill="${HS}" stroke="#fff" stroke-width="1.5" vector-effect="non-scaling-stroke"/>`;
+  }
 
   // Предпросмотр рисования
   const T = TOOLS[state.tool], D = state.drawing, cur = state.cursor;
@@ -417,7 +535,7 @@ function renderOverlay() {
     let tmp = null;
     if (T.mode === 'point' && !D) tmp = T.make(cur);
     else if (T.make && pts.length >= 2 && !(T.mode === 'polygon' && pts.length < 3)) tmp = T.make(pts);
-    if (tmp) s += `<g opacity="0.7">${R.renderOne(Object.assign({ id: '__tmp' }, defs, tmp), { k, exporting: true })}</g>`;
+    if (tmp) s += `<g opacity="0.7">${R.renderOne(Object.assign({ id: '__tmp' }, defs, tmp), { k, exporting: true, doc: state.doc })}</g>`;
     if (D && pts.length >= 2) {
       s += outline(pts, T.mode === 'polygon' && pts.length > 2);
       for (const p of D.points) s += `<circle cx="${p[0]}" cy="${p[1]}" r="${px(3.5)}" fill="${HS}"/>`;
@@ -455,7 +573,7 @@ function renderList() {
   $('#objCount').textContent = objs.length ? `(${objs.length})` : '';
   $('#objlist').innerHTML = objs.length ? objs.slice().reverse().map(o => {
     const sw = SWATCH[o.type === 'area' || o.type === 'path' ? o.kind : o.type] || '#ccc';
-    return `<div class="obj ${state.sel.includes(o.id) ? 'sel' : ''} ${o.hidden ? 'hid' : ''}" data-oid="${o.id}"><span class="sw" style="background:${sw}"></span><span class="nm">${R.esc(objLabel(o))}</span><button class="eye" title="Скрыть / показать">${o.hidden ? '◌' : '●'}</button></div>`;
+    return `<div class="obj ${state.sel.includes(o.id) ? 'sel' : ''} ${o.hidden ? 'hid' : ''}" data-oid="${o.id}"><span class="sw" style="background:${sw}"></span>${o.group ? '<span class="grp" title="В группе">⧉</span>' : ''}<span class="nm">${R.esc(objLabel(o))}</span><button class="eye" title="Скрыть / показать">${o.hidden ? '◌' : '●'}</button></div>`;
   }).join('') : '<div class="help" style="padding:8px 10px">Пока пусто. Выберите инструмент на ленте или нажмите «Пример».</div>';
 }
 $('#objlist').addEventListener('click', e => {
@@ -473,12 +591,12 @@ $('#objlist').addEventListener('click', e => {
 
 // ---------- Свойства ----------
 function fieldHtml(f, o) {
+  if (f.when && !f.when(o)) return '';
   if (f.custom) return f.custom(o);
   if (f.h) return `<div class="ph">${f.h}</div>`;
   if (f.note) return `<div class="help">${f.note}</div>`;
   if (f.info) return `<div class="pinfo" data-info="1">${f.info(o)}</div>`;
   if (f.btn) return `<div class="pbtns"><button class="btn" data-btn="${R.esc(f.btn)}">${f.btn}</button></div>`;
-  if (f.when && !f.when(o)) return '';
   const v = o[f.k] ?? '';
   switch (f.t) {
     case 'chk': return `<label class="pf chk"><input type="checkbox" data-k="${f.k}" ${v ? 'checked' : ''}><span>${f.l}</span></label>`;
@@ -504,17 +622,37 @@ function renderProps() {
     return;
   }
   if (state.sel.length === 0) { $('#propTitle').textContent = 'Схема'; el.innerHTML = docPanel(); return; }
+  const common = `<div class="pbtns"><button class="btn" data-act="duplicate">Дублировать</button><button class="btn" data-act="copy">Копировать</button><button class="btn" data-act="front">Наверх</button><button class="btn" data-act="back">Вниз</button><button class="btn danger" data-act="delete">Удалить</button></div>`;
   if (state.sel.length > 1) {
-    $('#propTitle').textContent = 'Свойства';
-    el.innerHTML = `<div class="pinfo">Выбрано объектов: ${state.sel.length}</div>
-      <div class="pbtns"><button class="btn" data-act="duplicate">Дублировать</button><button class="btn" data-act="front">Наверх</button><button class="btn" data-act="back">Вниз</button><button class="btn danger" data-act="delete">Удалить</button></div>
-      <div class="help" style="margin-top:10px"><kbd>Q</kbd>/<kbd>E</kbd> — повернуть группу, стрелки — сдвинуть.</div>`;
+    const objs = state.sel.map(getObj).filter(Boolean);
+    const grouped = objs.some(o => o.group);
+    const oneGroup = grouped && objs.every(o => o.group === objs[0].group);
+    $('#propTitle').textContent = oneGroup ? 'Группа' : 'Свойства';
+    el.innerHTML = `<div class="pinfo">${oneGroup ? 'Объектов в группе' : 'Выбрано объектов'}: ${objs.length}</div>
+      <div class="ph">Выравнивание</div>
+      <div class="aligns">${ALIGN_BTNS.map(([m, t, ic]) => `<button class="abtn" data-act="align:${m}" title="${t}"><svg viewBox="0 0 24 24">${ic}</svg></button>`).join('')}</div>
+      <div class="ph">Группа</div>
+      <div class="pbtns">${oneGroup ? '' : '<button class="btn" data-act="group">Сгруппировать</button>'}${grouped ? '<button class="btn" data-act="ungroup">Разгруппировать</button>' : ''}</div>
+      ${common}
+      <div class="help" style="margin-top:10px">Рамка: квадраты — масштаб (<kbd>Shift</kbd> — непропорционально, <kbd>Ctrl</kbd> — от центра), кружок — поворот. <kbd>Q</kbd>/<kbd>E</kbd> — повернуть, стрелки — сдвинуть, <kbd>Ctrl+G</kbd> — сгруппировать.</div>`;
     return;
   }
   const o = getObj(state.sel[0]);
   $('#propTitle').textContent = objLabel(o);
   el.innerHTML = (PROPS[o.type] || []).map(f => fieldHtml(f, o)).join('') +
-    `<div class="pbtns"><button class="btn" data-act="duplicate">Дублировать</button><button class="btn" data-act="front">Наверх</button><button class="btn" data-act="back">Вниз</button><button class="btn danger" data-act="delete">Удалить</button></div>`;
+    (o.group ? '<div class="pbtns"><button class="btn" data-act="ungroup">Убрать из группы</button></div>' : '') + common;
+}
+
+// Поля радиусов отдельных скругляемых углов площадки (номера углов видны на схеме)
+const MAX_CORNERS = 16;
+function roundedCorners(o) {
+  return G.filletCorners(o.points, o.round).map((w, i) => w ? i : -1).filter(i => i >= 0);
+}
+function cornerRadiiHtml(o) {
+  const idx = roundedCorners(o);
+  if (!idx.length || idx.length > MAX_CORNERS) return '';
+  return `<div class="pf"><span>Радиусы отдельных углов, м (пусто — общий)</span><div class="radii">${idx.map((i, n) =>
+    `<label><b>${n + 1}</b><input type="number" data-rad="${i}" step="0.5" min="0" value="${o.radii && o.radii[i] != null ? o.radii[i] : ''}" placeholder="${+o.radius || 0}"></label>`).join('')}</div></div>`;
 }
 
 function refreshInfo() {
@@ -544,7 +682,9 @@ function docPanel() {
       <li>Нарисуйте дороги, затем инструментом <b>Перекрёсток</b> щёлкните на их пересечении.</li>
       <li>Колесо — масштаб, средняя кнопка или <kbd>Пробел</kbd> — сдвиг холста.</li>
       <li><kbd>Ctrl+Z</kbd>/<kbd>Ctrl+Y</kbd> — отмена/возврат, <kbd>Ctrl+D</kbd> — дублировать, <kbd>Del</kbd> — удалить, <kbd>Ctrl+S</kbd> — сохранить.</li>
-      <li>Горячие клавиши инструментов: <kbd>V</kbd> выбор, <kbd>R</kbd> дорога, <kbd>J</kbd> перекрёсток, <kbd>B</kbd> здание, <kbd>G</kbd> газон, <kbd>M</kbd> разметка, <kbd>C</kbd> переход, <kbd>P</kbd> парковка, <kbd>L</kbd> светофор, <kbd>T</kbd> текст, <kbd>D</kbd> размер.</li>
+      <li><kbd>Ctrl+C</kbd>/<kbd>Ctrl+V</kbd> — копировать и вставить под курсор, в том числе в другую схему; <kbd>Ctrl+Shift+V</kbd> — на те же координаты. <kbd>Ctrl+G</kbd> — сгруппировать.</li>
+      <li>Вокруг выделения — рамка: квадраты меняют масштаб (<kbd>Shift</kbd> — непропорционально, <kbd>Ctrl</kbd> — от центра), кружок сверху поворачивает.</li>
+      <li>Горячие клавиши инструментов: <kbd>V</kbd> выбор, <kbd>R</kbd> дорога, <kbd>J</kbd> перекрёсток, <kbd>K</kbd> кольцо, <kbd>B</kbd> здание, <kbd>G</kbd> газон, <kbd>M</kbd> разметка, <kbd>C</kbd> переход, <kbd>P</kbd> парковка, <kbd>L</kbd> светофор, <kbd>T</kbd> текст, <kbd>D</kbd> размер.</li>
       <li>Схема автоматически сохраняется в браузере; для обмена используйте «Сохранить».</li>
     </ul></div>`;
 }
@@ -562,7 +702,13 @@ function applyField(el) {
   const o = getObj(state.sel[0]);
   if (!o) return;
   const k = el.dataset.k, v = readField(el);
-  if (o.type === 'light' && k === 'kind' || o.type === 'area' && k === 'kind' || o.type === 'path' && k === 'kind') {
+  if (o.type === 'pocket' && k === 'kind') {
+    // Остановка и парковочный карман — разные наборы параметров
+    const keep = { id: o.id, type: o.type, points: o.points, group: o.group, green: o.green, walk: o.walk };
+    for (const key of Object.keys(o)) delete o[key];
+    Object.assign(o, clone(state.defaults[v === 'bus' ? 'busstop' : 'pocket']), keep, { kind: v });
+    if (!keep.group) delete o.group;
+  } else if (o.type === 'light' && k === 'kind' || o.type === 'area' && k === 'kind' || o.type === 'path' && k === 'kind') {
     o[k] = v;
   } else {
     o[k] = v;
@@ -584,6 +730,13 @@ props.addEventListener('input', e => {
   else if (el.dataset.stext) {
     const o = getObj(state.sel[0]);
     o.items[+el.dataset.stext].text = el.value;
+    changed();
+  }
+  else if (el.dataset.rad !== undefined) {
+    const o = getObj(state.sel[0]), i = +el.dataset.rad;
+    o.radii = o.radii || {};
+    if (el.value === '') delete o.radii[i];
+    else o.radii[i] = Math.max(0, parseFloat(el.value) || 0);
     changed();
   }
   else if (el.dataset.bg) applyBg(el);
@@ -881,10 +1034,48 @@ svg.addEventListener('pointerdown', e => {
   }
 });
 
+// Четырёхугольник с прямыми углами
+function isRect(pts) {
+  if (pts.length !== 4) return false;
+  for (let i = 0; i < 4; i++) {
+    const a = G.norm(G.sub(pts[(i + 1) % 4], pts[i])), b = G.norm(G.sub(pts[(i + 3) % 4], pts[i]));
+    if (Math.abs(G.dot(a, b)) > 0.02) return false;
+  }
+  return true;
+}
+
+// Прямоугольник после перетаскивания угла idx в точку p: противоположный угол неподвижен, поворот сохраняется
+function resizeRect(orig, idx, p) {
+  const A = orig[(idx + 2) % 4], e1 = G.norm(G.sub(orig[1], orig[0])), e2 = G.norm(G.sub(orig[3], orig[0]));
+  const D0 = G.sub(orig[idx], A), D = G.sub(p, A);
+  const a0 = G.dot(D0, e1), b0 = G.dot(D0, e2);
+  let a = G.dot(D, e1), b = G.dot(D, e2);
+  const MIN = 0.5;
+  if (Math.abs(a) < MIN) a = MIN * (Math.sign(a) || Math.sign(a0));
+  if (Math.abs(b) < MIN) b = MIN * (Math.sign(b) || Math.sign(b0));
+  return orig.map(q => {
+    const v = G.sub(q, A);
+    return G.add(A, G.add(G.mul(e1, G.dot(v, e1) / a0 * a), G.mul(e2, G.dot(v, e2) / b0 * b)));
+  });
+}
+
 function selectDown(e, w) {
   const hd = e.target.closest('[data-handle]');
   if (hd) {
     const [id, idx] = hd.dataset.handle.split(':');
+    if (id === '__frame') {
+      state.drag = { kind: 'xform', h: idx, box: frameBox(), start: w, orig: new Map(state.sel.map(i => {
+        const o = getObj(i);
+        return [i, { points: clone(o.points), rot: +o.rot || 0, R: +o.R || 0, r: +o.r || 0 }];
+      })) };
+      return;
+    }
+    const o = getObj(id);
+    // Угол прямоугольной площадки тянет весь прямоугольник; Ctrl — свободная правка вершины
+    if (idx !== 'rot' && o.type === 'area' && !(e.ctrlKey || e.metaKey) && isRect(o.points)) {
+      state.drag = { kind: 'resize', id, idx: +idx, orig: clone(o.points) };
+      return;
+    }
     state.drag = idx === 'rot' ? { kind: 'rotate', id } : { kind: 'vertex', id, idx: +idx };
     return;
   }
@@ -896,8 +1087,14 @@ function selectDown(e, w) {
       state.drag = { kind: 'bg', start: w, orig: [state.doc.bg.x, state.doc.bg.y] };
       return;
     }
-    if (e.shiftKey) { toggleSel(id); return; }
-    if (!state.sel.includes(id)) setSel([id]);
+    // Щелчок выделяет всю группу; Ctrl+щелчок — только этот объект
+    const ids = e.ctrlKey || e.metaKey ? [id] : expandGroups([id]);
+    if (e.shiftKey) {
+      const all = ids.every(i => state.sel.includes(i));
+      setSel(all ? state.sel.filter(i => !ids.includes(i)) : [...new Set([...state.sel, ...ids])]);
+      return;
+    }
+    if (!state.sel.includes(id)) setSel(ids);
     state.drag = { kind: 'move', start: w, orig: new Map(state.sel.map(i => [i, clone(getObj(i).points)])) };
     return;
   }
@@ -911,6 +1108,8 @@ function beginMove(d) {
 
 svg.addEventListener('pointermove', e => {
   const w = toWorld(e);
+  state.lastW = w;
+  state.overCanvas = true;
   $('#stCoords').textContent = `X: ${fmt(w[0])}  Y: ${fmt(-w[1])} м`;
   const d = state.drag;
   if (d) {
@@ -935,6 +1134,61 @@ svg.addEventListener('pointermove', e => {
         const p = snapPt(w, e, { id: d.id, idx: d.idx });
         beginMove(d);
         o.points[d.idx] = p;
+        changed();
+        break;
+      }
+      case 'resize': {
+        const o = getObj(d.id);
+        if (!o) return;
+        const pts = resizeRect(d.orig, d.idx, snapPt(w, e, { id: d.id, idx: d.idx }));
+        if (!pts) return;
+        beginMove(d);
+        o.points = pts;
+        changed();
+        break;
+      }
+      case 'xform': {
+        if (!d.box) return;
+        const b = d.box, cx = (b.x0 + b.x1) / 2, cy = (b.y0 + b.y1) / 2;
+        let xf, rot = 0, k = null, label;
+        if (d.h === 'rot') {
+          let a = (Math.atan2(w[1] - cy, w[0] - cx) - Math.atan2(d.start[1] - cy, d.start[0] - cx)) * 180 / Math.PI;
+          a = e.shiftKey ? Math.round(a) : Math.round(a / 15) * 15;
+          while (a > 180) a -= 360;
+          while (a <= -180) a += 360;
+          const t = a * Math.PI / 180, cs = Math.cos(t), sn = Math.sin(t);
+          xf = p => [cx + (p[0] - cx) * cs - (p[1] - cy) * sn, cy + (p[0] - cx) * sn + (p[1] - cy) * cs];
+          rot = a;
+          label = `Поворот: ${a}°`;
+        } else {
+          const hx = d.h.includes('w') ? -1 : d.h.includes('e') ? 1 : 0, hy = d.h.includes('n') ? -1 : d.h.includes('s') ? 1 : 0;
+          const fromC = e.ctrlKey || e.metaKey;
+          const ax = fromC ? cx : hx < 0 ? b.x1 : b.x0, ay = fromC ? cy : hy < 0 ? b.y1 : b.y0;
+          const Hx = hx < 0 ? b.x0 : b.x1, Hy = hy < 0 ? b.y0 : b.y1;
+          const q = state.opts.snap && !e.altKey ? w.map(v => Math.round(v / SNAP_STEP) * SNAP_STEP) : w;
+          const lim = v => Math.abs(v) < 0.02 ? (v < 0 ? -0.02 : 0.02) : v;
+          const okX = hx && Math.abs(Hx - ax) > 1e-6, okY = hy && Math.abs(Hy - ay) > 1e-6;
+          let sx = okX ? lim((q[0] - ax) / (Hx - ax)) : 1, sy = okY ? lim((q[1] - ay) / (Hy - ay)) : 1;
+          // Угловые квадраты — пропорционально (Shift — свободно)
+          if (hx && hy && !e.shiftKey) {
+            const s = !okY || (okX && Math.abs(sx) > Math.abs(sy)) ? sx : sy;
+            if (okX) sx = s;
+            if (okY) sy = s;
+          }
+          xf = p => [ax + (p[0] - ax) * sx, ay + (p[1] - ay) * sy];
+          k = Math.max(Math.abs(okX ? sx : 0), Math.abs(okY ? sy : 0)) || 1;
+          label = `Масштаб: ${Math.round(sx * 100)}% × ${Math.round(sy * 100)}%`;
+        }
+        beginMove(d);
+        for (const [id, g] of d.orig) {
+          const o = getObj(id);
+          if (!o) continue;
+          o.points = g.points.map(xf);
+          if (rot && 'rot' in o) o.rot = (g.rot + rot) % 360;
+          if (k != null && o.type === 'roundabout') o.R = Math.round(g.R * k * 100) / 100;
+          if (k != null && o.type === 'tree') o.r = Math.round(g.r * k * 100) / 100;
+        }
+        $('#stHint').textContent = label;
         changed();
         break;
       }
@@ -981,11 +1235,12 @@ svg.addEventListener('pointerup', e => {
     if (d.kind === 'rubber') {
       const x0 = Math.min(d.a[0], d.b[0]), x1 = Math.max(d.a[0], d.b[0]), y0 = Math.min(d.a[1], d.b[1]), y1 = Math.max(d.a[1], d.b[1]);
       if (x1 - x0 > 0.01 || y1 - y0 > 0.01) {
-        const ids = state.doc.objects.filter(o => !o.hidden && state.doc.layers[layerOf(o)] && o.points.every(p => p[0] >= x0 && p[0] <= x1 && p[1] >= y0 && p[1] <= y1)).map(o => o.id);
+        const ids = expandGroups(state.doc.objects.filter(o => !o.hidden && state.doc.layers[layerOf(o)] && o.points.every(p => p[0] >= x0 && p[0] <= x1 && p[1] >= y0 && p[1] <= y1)).map(o => o.id));
         setSel(d.add ? [...new Set([...state.sel, ...ids])] : ids);
       }
       schedule({ overlay: true });
     } else if (d.moved) {
+      if (d.kind === 'xform') $('#stHint').textContent = TOOLS[state.tool].hint || '';
       schedule({ props: true });
       if (d.kind === 'bg') { clearTimeout(saveTimer); saveTimer = setTimeout(autosave, 600); }
     }
@@ -1022,12 +1277,13 @@ svg.addEventListener('dblclick', e => {
   if (T.mode === 'poly' || T.mode === 'polygon') { finishDrawing(); return; }
   if (state.tool !== 'select' || state.sel.length !== 1) return;
   const o = getObj(state.sel[0]);
-  if (!['road', 'path', 'area', 'marking'].includes(o.type)) return;
+  if (!['road', 'path', 'area', 'marking', 'fence'].includes(o.type)) return;
   const w = toWorld(e);
   const pr = G.project(o.points, w, o.type === 'area');
   if (!pr || pr.d > 12 / state.view.k + 1) return;
   checkpoint();
   o.points.splice(pr.i + 1, 0, pr.p);
+  shiftRadii(o, pr.i + 1, 1);
   changed();
 });
 
@@ -1036,14 +1292,27 @@ function deleteVertex(handle) {
   const o = getObj(id);
   if (!o || idx === 'rot') return;
   const min = o.type === 'area' ? 3 : 2;
-  if (!['road', 'path', 'area', 'marking'].includes(o.type) || o.points.length <= min) return toast('Нельзя удалить: слишком мало вершин');
+  if (!['road', 'path', 'area', 'marking', 'fence'].includes(o.type) || o.points.length <= min) return toast('Нельзя удалить: слишком мало вершин');
   checkpoint();
   o.points.splice(+idx, 1);
+  shiftRadii(o, +idx, -1);
   changed({ props: true });
 }
 
+// Сдвиг номеров вершин в radii после вставки (delta = 1) или удаления (delta = −1) вершины j
+function shiftRadii(o, j, delta) {
+  if (!o.radii) return;
+  const r = {};
+  for (const [key, v] of Object.entries(o.radii)) {
+    const i = +key;
+    if (delta < 0 && i === j) continue;
+    r[(delta > 0 ? i >= j : i > j) ? i + delta : i] = v;
+  }
+  o.radii = r;
+}
+
 svg.addEventListener('contextmenu', e => e.preventDefault());
-svg.addEventListener('pointerleave', () => { if (!state.drag) { state.cursor = null; state.snapInfo = null; schedule({ overlay: true }); } });
+svg.addEventListener('pointerleave', () => { state.overCanvas = false; if (!state.drag) { state.cursor = null; state.snapInfo = null; schedule({ overlay: true }); } });
 
 svg.addEventListener('wheel', e => {
   e.preventDefault();
@@ -1072,6 +1341,10 @@ window.addEventListener('keydown', e => {
     else if (code === 'KeyS') { e.preventDefault(); action('save'); }
     else if (code === 'KeyO') { e.preventDefault(); action('open'); }
     else if (code === 'KeyA') { e.preventDefault(); setSel(state.doc.objects.filter(o => !o.hidden).map(o => o.id)); }
+    else if (code === 'KeyC' && state.sel.length) { e.preventDefault(); action('copy'); }
+    else if (code === 'KeyX' && state.sel.length) { e.preventDefault(); action('cut'); }
+    else if (code === 'KeyV') state.pasteInPlace = e.shiftKey; // вставку выполняет событие paste
+    else if (code === 'KeyG') { e.preventDefault(); action(e.shiftKey ? 'ungroup' : 'group'); }
     return;
   }
   if (e.key === ' ') { state.space = true; svg.classList.add('panning'); e.preventDefault(); return; }
@@ -1100,7 +1373,7 @@ window.addEventListener('keydown', e => {
     return;
   }
   if (code === 'KeyQ' || code === 'KeyE') { rotateSel((code === 'KeyQ' ? -1 : 1) * (e.shiftKey ? 1 : 15)); return; }
-  const byKey = { KeyV: 'select', KeyH: 'pan', KeyR: 'road', KeyJ: 'junction', KeyB: 'building', KeyG: 'green', KeyM: 'marking', KeyC: 'crosswalk', KeyP: 'parking', KeyL: 'tlight', KeyT: 'text', KeyD: 'dim', KeyS: 'sign' };
+  const byKey = { KeyV: 'select', KeyH: 'pan', KeyR: 'road', KeyJ: 'junction', KeyK: 'roundabout', KeyB: 'building', KeyG: 'green', KeyM: 'marking', KeyC: 'crosswalk', KeyP: 'parking', KeyL: 'tlight', KeyT: 'text', KeyD: 'dim', KeyS: 'sign' };
   if (byKey[code]) setTool(byKey[code]);
 });
 window.addEventListener('keyup', e => {
@@ -1125,9 +1398,198 @@ function rotateSel(deg) {
   changed({ props: true });
 }
 
+// ---------- Группы, выравнивание ----------
+function expandGroups(ids) {
+  const gs = new Set(ids.map(getObj).filter(o => o && o.group).map(o => o.group));
+  if (!gs.size) return ids;
+  return [...new Set([...ids, ...state.doc.objects.filter(o => gs.has(o.group)).map(o => o.id)])];
+}
+
+// Габарит объекта: по вершинам, у кольца и дерева — с радиусом
+function objBox(o) {
+  const b = G.bbox(o.points);
+  const r = o.type === 'roundabout' ? +o.R || 20 : o.type === 'tree' ? +o.r || 2.5 : 0;
+  return { x0: b.x0 - r, y0: b.y0 - r, x1: b.x1 + r, y1: b.y1 + r };
+}
+function unionBox(objs) {
+  return objs.map(objBox).reduce((a, b) => ({ x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0), x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1) }));
+}
+
+// Рамка масштаба и поворота — для выделения, у которого есть размер
+const FRAMELESS = new Set(['sign', 'light', 'pole', 'text', 'tree', 'crosswalk', 'dim', 'ramp']);
+function frameBox() {
+  if (state.tool !== 'select' || !state.sel.length) return null;
+  const objs = state.sel.map(getObj).filter(Boolean);
+  if (!objs.length || (objs.length === 1 && FRAMELESS.has(objs[0].type))) return null;
+  const b = unionBox(objs);
+  return b.x1 - b.x0 < 0.01 && b.y1 - b.y0 < 0.01 ? null : b;
+}
+
+// Выравнивание и распределение; объекты одной группы двигаются вместе
+function alignSel(mode) {
+  const map = new Map();
+  for (const o of state.sel.map(getObj).filter(Boolean)) {
+    const key = o.group || o.id;
+    if (!map.has(key)) map.set(key, []);
+    map.get(key).push(o);
+  }
+  const us = [...map.values()].map(objs => ({ objs, b: unionBox(objs) }));
+  const dist = mode.startsWith('dist');
+  if (us.length < (dist ? 3 : 2)) return toast(dist ? 'Для распределения выделите не меньше трёх объектов' : 'Выделите два или больше объектов');
+  const horiz = ['left', 'hcenter', 'right', 'distH'].includes(mode);
+  const c = u => horiz ? (u.b.x0 + u.b.x1) / 2 : (u.b.y0 + u.b.y1) / 2;
+  const move = (u, d) => { const dv = horiz ? [d, 0] : [0, d]; for (const o of u.objs) o.points = o.points.map(p => G.add(p, dv)); };
+  const B = unionBox(us.flatMap(u => u.objs));
+  checkpoint();
+  if (dist) {
+    us.sort((a, b) => c(a) - c(b));
+    const c0 = c(us[0]), c1 = c(us[us.length - 1]);
+    us.forEach((u, i) => move(u, c0 + (c1 - c0) * i / (us.length - 1) - c(u)));
+  } else {
+    for (const u of us) {
+      move(u, { left: B.x0 - u.b.x0, hcenter: (B.x0 + B.x1) / 2 - c(u), right: B.x1 - u.b.x1, top: B.y0 - u.b.y0, vcenter: (B.y0 + B.y1) / 2 - c(u), bottom: B.y1 - u.b.y1 }[mode]);
+    }
+  }
+  changed();
+}
+
+// ---------- Буфер обмена (работает между схемами и вкладками) ----------
+const CLIP_KEY = 'ksodd.clipboard';
+function copySel() {
+  const objs = state.doc.objects.filter(o => state.sel.includes(o.id));
+  if (!objs.length) return false;
+  const txt = JSON.stringify({ ksodd: 'objects', objects: objs });
+  try { localStorage.setItem(CLIP_KEY, txt); } catch (_) { /* хранилище недоступно */ }
+  try { navigator.clipboard.writeText(txt).catch(() => {}); } catch (_) { /* нет доступа к буферу */ }
+  return objs.length;
+}
+function parseClip(txt) {
+  try {
+    const d = JSON.parse(txt);
+    if (d && d.ksodd === 'objects' && Array.isArray(d.objects)) {
+      const objs = d.objects.filter(o => o && o.type && Array.isArray(o.points) && o.points.length);
+      return objs.length ? objs : null;
+    }
+  } catch (_) { /* не наши данные */ }
+  return null;
+}
+function localClip() {
+  try { return parseClip(localStorage.getItem(CLIP_KEY) || ''); } catch (_) { return null; }
+}
+function viewCenter() {
+  const r = svg.getBoundingClientRect(), v = state.view;
+  return [(r.width / 2 - v.tx) / v.k, (r.height / 2 - v.ty) / v.k];
+}
+// Копии объектов со сдвигом dv: новые id, свои группы
+function insertCopies(src, dv) {
+  const gmap = {};
+  const out = src.map(o => {
+    const c = clone(o);
+    c.id = uid();
+    if (c.group) c.group = gmap[c.group] || (gmap[c.group] = uid());
+    c.points = c.points.map(p => G.add(p, dv));
+    return c;
+  });
+  checkpoint();
+  state.doc.objects.push(...out);
+  state.sel = out.map(c => c.id);
+  changed({ props: true });
+  return out;
+}
+// Вставка под курсор (или в центр экрана); inPlace — на те же координаты
+function pasteObjs(objs, inPlace) {
+  if (!objs) return toast('Буфер пуст — сначала скопируйте объекты (Ctrl+C)');
+  let dv = [0, 0];
+  if (!inPlace) {
+    const b = unionBox(objs), t = state.overCanvas && state.lastW ? state.lastW : viewCenter();
+    dv = [t[0] - (b.x0 + b.x1) / 2, t[1] - (b.y0 + b.y1) / 2];
+    if (state.opts.snap) dv = dv.map(v => Math.round(v / SNAP_STEP) * SNAP_STEP);
+  }
+  if (state.tool !== 'select') setTool('select');
+  insertCopies(objs, dv);
+  toast(`Вставлено объектов: ${objs.length}`);
+}
+window.addEventListener('paste', e => {
+  if (e.target.closest && e.target.closest('input,textarea,select')) return;
+  const objs = parseClip(e.clipboardData ? e.clipboardData.getData('text/plain') : '') || localClip();
+  e.preventDefault();
+  pasteObjs(objs, state.pasteInPlace);
+  state.pasteInPlace = false;
+});
+
+// ---------- Помощники инструментов ----------
+// Кольцо встаёт в точку пересечения дорог, если щёлкнули рядом с ним
+function ringCenter(p) {
+  const X = findJunction(p);
+  return X && G.dist(X.p, p) < Math.max(+state.defaults.roundabout.R || 20, 15) ? X.p.map(v => Math.round(v * 100) / 100) : p;
+}
+
+// Карман прилипает к кромке ближайшей дороги; точки упорядочиваются так, чтобы карман был справа по ходу
+function pocketSnap(pts) {
+  const [a, b] = pts, mid = G.lerp(a, b, 0.5);
+  let best = null;
+  for (const r of state.doc.objects) {
+    if (r.type !== 'road' || r.hidden || r.points.length < 2) continue;
+    const c = roadCenter(r), pr = G.project(c, mid), m = roadMetrics(r), n = G.perp(pr.dir);
+    const off = G.dot(G.sub(mid, pr.p), n), side = off >= 0 ? 1 : -1, edge = side > 0 ? m.pos : m.neg;
+    const de = Math.abs(off - edge);
+    if (de < 10 && (!best || de < best.de)) best = { r, c, side, edge, de, n };
+  }
+  if (!best) return { points: [a.slice(), b.slice()] };
+  const on = p => { const q = G.project(best.c, p); return G.add(q.p, G.mul(G.perp(q.dir), best.edge)); };
+  let A = on(a), Bp = on(b);
+  if (G.dot(G.perp(G.sub(Bp, A)), G.mul(best.n, best.side)) < 0) [A, Bp] = [Bp, A];
+  const r = best.r;
+  return { points: [A, Bp], green: +r.greenStrip || 0, walk: +(best.side > 0 ? r.sidewalkR : r.sidewalkL) || 0 };
+}
+
+// Пандус смотрит на ось ближайшей дороги
+function rampRot(p) {
+  let best = null;
+  for (const r of state.doc.objects) {
+    if (r.type !== 'road' || r.hidden || r.points.length < 2) continue;
+    const pr = G.project(roadCenter(r), p);
+    if (!best || pr.d < best.d) best = pr;
+  }
+  if (!best || best.d < 0.01 || best.d > 40) return +state.defaults.ramp.rot || 0;
+  const v = G.sub(best.p, p);
+  return Math.round(Math.atan2(v[1], v[0]) * 180 / Math.PI);
+}
+
 // ---------- Действия ----------
 function action(a) {
+  if (a.startsWith('align:')) return alignSel(a.slice(6));
   switch (a) {
+    case 'copy': {
+      const n = copySel();
+      if (n) toast(`Скопировано объектов: ${n}. Вставка — Ctrl+V, в том числе в другую схему`);
+      break;
+    }
+    case 'cut':
+      if (!copySel()) return;
+      action('delete');
+      toast('Вырезано. Вставка — Ctrl+V');
+      break;
+    case 'paste': pasteObjs(localClip(), false); break;
+    case 'group': {
+      const objs = state.sel.map(getObj).filter(Boolean);
+      if (objs.length < 2) return toast('Выделите несколько объектов');
+      checkpoint();
+      const g = uid();
+      objs.forEach(o => { o.group = g; });
+      changed({ props: true });
+      toast('Объекты сгруппированы');
+      break;
+    }
+    case 'ungroup': {
+      const objs = state.sel.map(getObj).filter(o => o && o.group);
+      if (!objs.length) return;
+      checkpoint();
+      objs.forEach(o => { delete o.group; });
+      changed({ props: true });
+      toast('Группа расформирована');
+      break;
+    }
     case 'new':
       if (state.doc.objects.length && !confirm('Начать новую схему? Несохранённые изменения будут потеряны.')) return;
       state.doc = newDoc(); state.undo = []; state.redo = []; state.sel = [];
@@ -1149,21 +1611,10 @@ function action(a) {
       state.sel = [];
       changed({ props: true });
       break;
-    case 'duplicate': {
+    case 'duplicate':
       if (!state.sel.length) return;
-      checkpoint();
-      const ids = [];
-      for (const id of state.sel) {
-        const c = clone(getObj(id));
-        c.id = uid();
-        c.points = c.points.map(p => G.add(p, [2, 2]));
-        state.doc.objects.push(c);
-        ids.push(c.id);
-      }
-      state.sel = ids;
-      changed({ props: true });
+      insertCopies(state.doc.objects.filter(o => state.sel.includes(o.id)), [2, 2]);
       break;
-    }
     case 'front': case 'back': {
       checkpoint();
       const sel = state.doc.objects.filter(o => state.sel.includes(o.id));
@@ -1216,6 +1667,7 @@ function loadDoc(d) {
   if (!d || !Array.isArray(d.objects)) throw new Error('bad');
   const base = newDoc();
   state.doc = { ...base, ...d, layers: { ...base.layers, ...(d.layers || {}) } };
+  for (const o of state.doc.objects) if (o.type === 'road' && o.curbR === undefined) o.curbR = DEFAULTS.road.curbR;
   state.sel = []; state.undo = []; state.redo = []; state.drawing = null;
   renderLayers(); renderBg(); changed({ props: true });
 }

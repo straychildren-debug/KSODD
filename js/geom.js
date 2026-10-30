@@ -149,28 +149,36 @@ const G = (() => {
     return ins;
   }
 
-  // Скругление углов многоугольника. mode: none | all | inner (вогнутые) | outer (выпуклые)
-  function fillet(pts, radius, mode) {
+  // Вершины многоугольника, которые скругляются в режиме mode: none | all | inner (вогнутые) | outer (выпуклые)
+  function filletCorners(pts, mode) {
     const n = pts.length;
-    if (!radius || !mode || mode === 'none' || n < 3) return { pts: pts.slice(), arcs: [] };
+    if (!mode || mode === 'none' || n < 3) return pts.map(() => false);
     const sgn = Math.sign(area(pts)) || 1;
-    const want = pts.map((P, i) => {
+    return pts.map((P, i) => {
       const A = pts[(i - 1 + n) % n], B = pts[(i + 1) % n];
       const c = cross(sub(P, A), sub(B, P));
       if (Math.abs(c) < 1e-9) return false;
       const convex = Math.sign(c) === sgn;
       return mode === 'all' || (mode === 'inner' && !convex) || (mode === 'outer' && convex);
     });
+  }
+
+  // Скругление углов многоугольника. radii — свои радиусы отдельных вершин { индекс: радиус }
+  function fillet(pts, radius, mode, radii) {
+    const n = pts.length;
+    const want = filletCorners(pts, mode);
+    if (!want.some(Boolean)) return { pts: pts.slice(), arcs: [] };
     const out = [], arcs = [];
     for (let i = 0; i < n; i++) {
       const P = pts[i];
-      if (!want[i]) { out.push(P); continue; }
+      const rad = radii && radii[i] != null && radii[i] !== '' ? +radii[i] : radius;
+      if (!want[i] || !(rad > 0)) { out.push(P); continue; }
       const ia = (i - 1 + n) % n, ib = (i + 1) % n, A = pts[ia], B = pts[ib];
       const u = norm(sub(A, P)), v = norm(sub(B, P));
       const th = Math.acos(Math.max(-1, Math.min(1, dot(u, v))));
       if (th < 1e-3 || th > Math.PI - 1e-3) { out.push(P); continue; }
       const lim = Math.min(dist(P, A) * (want[ia] ? 0.5 : 0.98), dist(P, B) * (want[ib] ? 0.5 : 0.98));
-      let t = radius / Math.tan(th / 2), r = radius;
+      let t = rad / Math.tan(th / 2), r = rad;
       if (t > lim) { t = lim; r = t * Math.tan(th / 2); }
       const T1 = add(P, mul(u, t)), T2 = add(P, mul(v, t));
       const O = add(P, mul(norm(add(u, v)), r / Math.sin(th / 2)));
@@ -190,5 +198,69 @@ const G = (() => {
     return { pts: out, arcs };
   }
 
-  return { add, sub, mul, dot, cross, len, dist, norm, perp, lerp, dedupe, catmull, offset, length, cumulative, slice, project, segX, lineX, area, centroid, inPoly, fillet };
+  // Скругление изломов открытой ломаной дугами. radius(i, turn) — радиус в вершине i,
+  // turn > 0 — поворот вправо по ходу.
+  function roundPolyline(pts, radius) {
+    const n = pts.length;
+    if (n < 3) return pts.slice();
+    const out = [pts[0]];
+    for (let i = 1; i < n - 1; i++) {
+      const P = pts[i], A = pts[i - 1], B = pts[i + 1];
+      const u = norm(sub(A, P)), v = norm(sub(B, P));
+      const th = Math.acos(Math.max(-1, Math.min(1, dot(u, v))));
+      const turn = cross(sub(P, A), sub(B, P));
+      const r0 = radius(i, turn);
+      if (!(r0 > 0) || th < 1e-3 || th > Math.PI - 1e-3) { out.push(P); continue; }
+      const lim = Math.min(dist(P, A) * (i > 1 ? 0.5 : 0.98), dist(P, B) * (i < n - 2 ? 0.5 : 0.98));
+      let t = r0 / Math.tan(th / 2), r = r0;
+      if (t > lim) { t = lim; r = t * Math.tan(th / 2); }
+      const T1 = add(P, mul(u, t)), T2 = add(P, mul(v, t));
+      const O = add(P, mul(norm(add(u, v)), r / Math.sin(th / 2)));
+      const a1 = Math.atan2(T1[1] - O[1], T1[0] - O[0]);
+      let da = Math.atan2(T2[1] - O[1], T2[0] - O[0]) - a1;
+      while (da > Math.PI) da -= 2 * Math.PI;
+      while (da < -Math.PI) da += 2 * Math.PI;
+      const steps = Math.max(6, Math.ceil(Math.abs(da) / (Math.PI / 48)));
+      for (let k = 0; k <= steps; k++) {
+        const a = a1 + da * k / steps;
+        out.push([O[0] + r * Math.cos(a), O[1] + r * Math.sin(a)]);
+      }
+    }
+    out.push(pts[n - 1]);
+    return dedupe(out);
+  }
+
+  // Дуга окружности (центр O, радиус r) от угла a1 на угол da, шаг не крупнее step
+  function arc(O, r, a1, da, step = Math.PI / 48) {
+    const n = Math.max(2, Math.ceil(Math.abs(da) / step));
+    const out = [];
+    for (let k = 0; k <= n; k++) {
+      const a = a1 + da * k / n;
+      out.push([O[0] + r * Math.cos(a), O[1] + r * Math.sin(a)]);
+    }
+    return out;
+  }
+
+  // Параметры t пересечения прямой p + t·d с окружностью (O, r), по возрастанию
+  function lineCircle(p, d, O, r) {
+    const f = sub(p, O), A = dot(d, d), B = 2 * dot(f, d), Cq = dot(f, f) - r * r;
+    const D = B * B - 4 * A * Cq;
+    if (D < 0 || A < 1e-12) return [];
+    const s = Math.sqrt(D);
+    return [(-B - s) / (2 * A), (-B + s) / (2 * A)];
+  }
+
+  // Ограничивающий прямоугольник набора точек
+  function bbox(pts) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of pts) {
+      if (p[0] < x0) x0 = p[0];
+      if (p[0] > x1) x1 = p[0];
+      if (p[1] < y0) y0 = p[1];
+      if (p[1] > y1) y1 = p[1];
+    }
+    return { x0, y0, x1, y1 };
+  }
+
+  return { add, sub, mul, dot, cross, len, dist, norm, perp, lerp, dedupe, catmull, offset, roundPolyline, length, cumulative, slice, project, segX, lineX, area, centroid, inPoly, filletCorners, fillet, arc, lineCircle, bbox };
 })();
