@@ -21,13 +21,13 @@ const DEFAULTS = {
   junction: { label: '', labelSize: 2, round: 'inner', radius: 8 },
   roundabout: { R: 20, ringW: 7, lanes: 2, island: 'green', apron: 2, entryR: 12, green: 1.5, walk: 3 },
   busstop: { kind: 'bus', depth: 3, taperIn: 15, taperOut: 15, radius: 15, green: 1.5, walk: 2.25, zig: true, pavilion: true },
-  pocket: { kind: 'parking', taperIn: 5, taperOut: 5, radius: 3, green: 1.5, walk: 2.25, angle: 0, stallW: 2.5, stallL: 6, numbered: false, startNum: 1, highlight: false, hlColor: '#2f80ed', mgn: 0 },
+  pocket: { kind: 'parking', taperIn: 5, taperOut: 5, radius: 3, green: 1.5, walk: 2.25, angle: 0, stallW: 2.5, stallL: 6, numbered: false, startNum: 1, highlight: false, hlColor: '#2f80ed', mgn: 0, outerLine: true },
   fence: { kind: 'ped', step: 2.5 },
   ramp: { width: 2, depth: 1.5, tactile: true, rot: 0 },
   tree: { r: 2.5 },
   marking: { style: '1.1', smooth: false },
   crosswalk: { width: 4, style: 'white' },
-  parking: { side: 'right', angle: 90, stallW: 2.5, stallL: 5, numbered: false, startNum: 1, highlight: true, hlColor: '#2f80ed', mgn: 0 },
+  parking: { side: 'right', angle: 90, stallW: 2.5, stallL: 5, numbered: false, startNum: 1, highlight: true, hlColor: '#2f80ed', mgn: 0, outerLine: true },
   sign: { size: 3, rot: 90 },
   tlight: { size: 1.5, rot: 0 },
   plight: { size: 1.5, rot: 0 },
@@ -215,6 +215,7 @@ const PROPS = {
     { k: 'angle', l: 'Расстановка', t: 'sel', n: 1, o: [['0', 'параллельно (вдоль)'], ['45', 'под углом 45°'], ['60', 'под углом 60°'], ['90', 'перпендикулярно (90°)']], when: o => o.kind === 'parking' },
     { ...num('stallW', 'Ширина места, м', 0.1, 1.5), when: o => o.kind === 'parking' },
     { ...num('stallL', 'Длина места, м', 0.1, 2), when: o => o.kind === 'parking' },
+    { k: 'outerLine', l: 'Синяя прерывистая линия со стороны проезда', t: 'chk', when: o => o.kind === 'parking' },
     { k: 'highlight', l: 'Подсветить зону', t: 'chk', when: o => o.kind === 'parking' },
     { k: 'hlColor', l: 'Цвет подсветки', t: 'colorPick', sw: () => PARKING_SWATCHES, when: o => o.kind === 'parking' && o.highlight },
     { k: 'numbered', l: 'Нумеровать места', t: 'chk', when: o => o.kind === 'parking' },
@@ -251,6 +252,7 @@ const PROPS = {
     { k: 'side', l: 'Места по ходу линии', t: 'sel', o: [['right', 'справа'], ['left', 'слева']] },
     { k: 'angle', l: 'Расстановка', t: 'sel', n: 1, o: [['90', 'перпендикулярно (90°)'], ['60', 'под углом 60°'], ['45', 'под углом 45°'], ['0', 'параллельно (вдоль)']] },
     num('stallW', 'Ширина места, м', 0.1, 1.5), num('stallL', 'Длина места, м', 0.1, 2),
+    { k: 'outerLine', l: 'Синяя прерывистая линия со стороны проезда', t: 'chk' },
     { k: 'highlight', l: 'Подсветить зону', t: 'chk' },
     { k: 'hlColor', l: 'Цвет подсветки', t: 'colorPick', sw: () => PARKING_SWATCHES, when: o => o.highlight },
     { k: 'numbered', l: 'Нумеровать места', t: 'chk' },
@@ -1667,7 +1669,10 @@ function loadDoc(d) {
   if (!d || !Array.isArray(d.objects)) throw new Error('bad');
   const base = newDoc();
   state.doc = { ...base, ...d, layers: { ...base.layers, ...(d.layers || {}) } };
-  for (const o of state.doc.objects) if (o.type === 'road' && o.curbR === undefined) o.curbR = DEFAULTS.road.curbR;
+  for (const o of state.doc.objects) {
+    if (o.type === 'road' && o.curbR === undefined) o.curbR = DEFAULTS.road.curbR;
+    if ((o.type === 'parking' || o.type === 'pocket') && o.outerLine === undefined) o.outerLine = true;
+  }
   state.sel = []; state.undo = []; state.redo = []; state.drawing = null;
   renderLayers(); renderBg(); changed({ props: true });
 }

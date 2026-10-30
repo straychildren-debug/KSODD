@@ -5,7 +5,7 @@ const C = {
   asphalt: '#a5a8ac', curb: '#5f6368', walk: '#e8e1d1', walkEdge: '#b0a690',
   lawn: '#b9dc95', lawnEdge: '#88b968', median: '#5cb85c',
   building: '#efe2cf', buildingEdge: '#7d6a52', bike: '#d9917f',
-  mark: '#ffffff', yellow: '#f5c400', ink: '#263238',
+  mark: '#ffffff', yellow: '#f5c400', ink: '#263238', markBlue: '#1f7ae0',
 };
 
 // Категории для панели «Слои»
@@ -218,7 +218,7 @@ const R = (() => {
     B.patch.push(fill(g.poly, C.asphalt, id));
     B.patch.push(stroke(g.curb, 0.15, C.curb, 'stroke-linecap="round"'));
     if (o.kind === 'parking') {
-      RENDER.parking(Object.assign({}, o, { points: [g.a, g.b], side: 'right' }), B, ctx);
+      RENDER.parking(Object.assign({}, o, { points: [g.a, g.b], side: 'right', outerAtBase: true }), B, ctx);
       return;
     }
     if (o.zig) markLine(B.mark, [g.at(0, g.D - 0.75), g.at(g.L, g.D - 0.75)], '1.17', id);
@@ -288,6 +288,13 @@ const R = (() => {
     if (o.highlight) B.mark.push(fill(g.outline, o.hlColor || '#2f80ed', `fill-opacity="0.25" ${id}`));
     else B.mark.push(fill(g.outline, 'rgba(0,0,0,0)', id));
     for (const l of g.lines) B.mark.push(stroke(l, 0.1, C.mark, id));
+    // Граница стоянки со стороны проезда: синяя прерывистая, как на платных парковках;
+    // у кармана проезд — со стороны прежней кромки (базовой линии)
+    if (g.count > 0) {
+      const edge = o.outerAtBase ? g.base : g.outer;
+      if (o.outerLine) B.mark.push(stroke(edge, 0.12, C.markBlue, `stroke-dasharray="1 1" ${id}`));
+      else if (!o.outerAtBase && !(+o.angle)) B.mark.push(stroke(edge, 0.1, C.mark, id));
+    }
     const mgn = Math.min(+o.mgn || 0, g.count);
     if (mgn > 0) {
       // Разметка 1.24.3 «Инвалиды»: читается со стороны проезда, верх символа — к бордюру
@@ -572,13 +579,14 @@ function parkingGeom(o) {
   const W = +o.stallW || 2.5, SL = +o.stallL || 5, ang = +o.angle || 0;
   const at = (s, d, h) => G.add(G.add(a, G.mul(u, s)), G.mul(d, h));
   const lines = [], centers = [];
-  let N, outline, dir = n;
+  let N, outline, outer, base, dir = n;
   if (ang === 0) {
     N = Math.floor(L / SL + 1e-6);
     for (let i = 0; i <= N; i++) lines.push([at(i * SL, n, 0), at(i * SL, n, W)]);
     for (let i = 0; i < N; i++) centers.push(at(i * SL + SL / 2, n, W / 2));
-    if (N > 0) lines.push([at(0, n, W), at(N * SL, n, W)]);
     outline = [at(0, n, 0), at(N * SL, n, 0), at(N * SL, n, W), at(0, n, W)];
+    outer = [at(0, n, W), at(N * SL, n, W)];
+    base = [at(0, n, 0), at(N * SL, n, 0)];
   } else {
     const th = ang * Math.PI / 180, sn = Math.sin(th), cs = Math.cos(th);
     const d = G.add(G.mul(u, cs), G.mul(n, sn)), pitch = W / sn;
@@ -587,7 +595,10 @@ function parkingGeom(o) {
     for (let i = 0; i <= N; i++) lines.push([at(i * pitch, n, 0), at(i * pitch, d, SL)]);
     for (let i = 0; i < N; i++) centers.push(G.add(at(i * pitch + pitch / 2, n, 0), G.mul(d, SL / 2)));
     outline = [at(0, n, 0), at(N * pitch, n, 0), at(N * pitch, d, SL), at(0, d, SL)];
+    outer = [at(0, d, SL), at(N * pitch, d, SL)];
+    base = [at(0, n, 0), at(N * pitch, n, 0)];
   }
-  // dir — «вглубь» места (для ориентации символов), along — вдоль длинной стороны места
-  return { lines, centers, outline, count: N, dir, along: ang === 0 ? u : dir };
+  // dir — «вглубь» места (для ориентации символов), along — вдоль длинной стороны места;
+  // outer — дальняя от бордюра граница мест, base — граница у линии разметки
+  return { lines, centers, outline, outer, base, count: N, dir, along: ang === 0 ? u : dir };
 }
